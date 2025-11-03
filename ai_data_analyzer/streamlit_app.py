@@ -73,7 +73,7 @@ def main():
         else:
             text = "\n\n".join(df[text_col].dropna().astype(str).head(200).tolist())
 
-        api_key = os.environ.get("GEMINI_API_KEY") if use_ai else None
+        api_key = "AIzaSyDfn99Bg2PgO66dTN50B2eenTIEm9YXoWY" if use_ai else None
         try:
             summary = ai_summarize(text, api_key=api_key, n_sentences=n_sent)
         except NotImplementedError:
