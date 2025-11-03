@@ -8,6 +8,7 @@ if st.button("Fetch News"):
     if "❌ Error" in news:
         st.error("News Fetching Failed")
     else:
+        st.balloons()
         st.success("News fetched Successfully")  
         st.info("\n".join(news[:4]))   
         st.link_button("Read more", news[4].split("   🔗 ")[1])
