@@ -1,12 +1,12 @@
 import streamlit as st
-from PyPDF2 import PdfReader
+import pdfplumber
 from docx import Document
 import requests
 import websearch
 import time
 
 # ------------------ CONFIGURATION ------------------
-st.set_page_config(page_title="Serene AI Summarizer", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="🧠 Serene AI Summarizer", page_icon="🌐", layout="wide")
 
 # Hugging Face API Endpoint
 API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
@@ -112,9 +112,10 @@ else:
         with st.spinner("🔍 Extracting text..."):
             try:
                 if file_type == "pdf":
-                    reader = PdfReader(uploaded_file)
-                    for page in reader.pages:
-                        extracted_text += page.extract_text() or ""
+                    # Using pdfplumber for accurate extraction
+                    with pdfplumber.open(uploaded_file) as pdf:
+                        for page in pdf.pages:
+                            extracted_text += page.extract_text() or ""
 
                 elif file_type == "docx":
                     doc = Document(uploaded_file)
