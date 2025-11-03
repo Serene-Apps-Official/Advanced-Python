@@ -1,0 +1,20 @@
+Mini Project: AI-Powered Data Analyzer
+🎯 Project Goal:
+
+Yeh project ek intelligent data analyzer banata hai jo:
+
+Automatically data files (CSV/Excel) read kare
+
+Data par analysis aur summary run kare
+
+AI ke through smart insights aur text summary generate kare
+
+Aur last me interactive dashboard me results visualize kare 📊
+
+🧩 Tech Stack / Tools Used
+Purpose	Tools / Libraries
+Data Reading & Cleaning	pandas, numpy
+Visualization	plotly, streamlit
+AI Text Summarization	openai (or Hugging Face Transformers)
+File Handling	os, json, csv, pdfplumber
+Optional Web Scraping	aiohttp, BeautifulSoup
