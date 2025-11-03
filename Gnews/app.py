@@ -10,4 +10,4 @@ if st.button("Fetch News"):
     else:
         st.success("News fetched Successfully")  
         st.info("\n".join(news[:4]))   
-        st.link("Read more", news[4].split("   🔗 ")[1])
+        st.link_button("Read more", news[4].split("   🔗 ")[1])
