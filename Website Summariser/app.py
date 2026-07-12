@@ -1,30 +1,56 @@
 import streamlit as st
-import google.generativeai as genai
-import websearch
+import pandas as pd
 
-# Configure Gemini (use your API key directly here for now)
-genai.configure(api_key="AIzaSyDfn99Bg2PgO66dTN50B2eenTIEm9YXoWY")
-model = genai.GenerativeModel("gemini-2.0-flash")
+# 1. Initialize Persistent Storage State
+if "poll_data" not in st.session_state:
+    st.session_state.poll_data = {
+        "Python": 0,
+        "JavaScript": 0,
+        "C++": 0,
+        "Rust": 0
+    }
+if "has_voted" not in st.session_state:
+    st.session_state.has_voted = False
 
-# Streamlit UI
-st.title("🌐 AI Website Summarizer")
+# 2. Application UI Layout
+st.title("Streamlit Real-Time Polling Application")
+st.write("Cast your vote below to see the community preferences update instantaneously.")
 
-url = st.text_input("Enter a website URL")
+# 3. Voting Interface Logic
+if not st.session_state.has_voted:
+    st.subheader("What is your primary programming language for automation?")
+    
+    # Selection component
+    choice = st.radio(
+        label="Select an option:",
+        options=list(st.session_state.poll_data.keys())
+    )
+    
+    # Vote submission processing
+    if st.button("Submit Vote"):
+        st.session_state.poll_data[choice] += 1
+        st.session_state.has_voted = True
+        st.rerun()
 
-if st.button("Summarize"):
-    if url:
-        st.write("⏳ Fetching website content...")
-        try:
-            website_description = websearch.getWebDescript('https://'+url)
-            st.write("✅ Website content fetched!")
-
-            st.write("🧠 Generating summary...")
-            prompt = f"Summarize this website content clearly:\n\n{website_description}"
-            result = model.generate_content(prompt)
-
-            st.subheader("AI Summary")
-            st.write(result.text)
-        except Exception as e:
-            st.error(f"Error: {e}")
-    else:
-        st.warning("Please enter a valid URL.")
+# 4. Results & Visualization Rendering
+else:
+    st.success("Thank you for voting! Here are the current metrics:")
+    
+    # Transform session state data into a Pandas DataFrame for charting
+    df = pd.DataFrame(
+        list(st.session_state.poll_data.items()), 
+        columns=["Language", "Votes"]
+    ).set_index("Language")
+    
+    # Display graphical results
+    st.bar_chart(df)
+    
+    # Display raw metric cards
+    cols = st.columns(len(st.session_state.poll_data))
+    for col, (lang, count) in zip(cols, st.session_state.poll_data.items()):
+        col.metric(label=lang, value=count)
+        
+    # Option to reset state (for testing purposes)
+    if st.button("Vote Again (Reset)"):
+        st.session_state.has_voted = False
+        st.rerun()
