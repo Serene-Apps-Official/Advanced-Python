@@ -521,4 +521,32 @@ else:
             messages = get_conversation(my_email, active_email)
 
             with chat_box:
-                if 
+                    if not messages:
+        st.caption("No messages yet. Say hello!")
+
+    for m in messages:
+        is_mine = m["sender_email"] == my_email
+        align = "right" if is_mine else "left"
+        bubble_color = "#DCF8C6" if is_mine else "#FFFFFF"
+        sender_label = "You" if is_mine else active_name
+        timestamp = time.strftime("%H:%M", time.localtime(m["sent_at"]))
+
+        st.markdown(
+            f"""
+            <div style="display:flex; justify-content:{'flex-end' if is_mine else 'flex-start'}; margin:4px 0;">
+              <div style="background:{bubble_color}; border-radius:10px; padding:8px 12px;
+                          max-width:70%; box-shadow:0 1px 2px rgba(0,0,0,0.15);">
+                <div style="font-size:0.75em; color:#555; margin-bottom:2px;">
+                    {escape(sender_label)}
+                </div>
+                <div style="white-space:pre-wrap; word-wrap:break-word;">
+                    {escape(m['body'])}
+                </div>
+                <div style="font-size:0.7em; color:#888; text-align:right; margin-top:2px;">
+                    {timestamp}
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
