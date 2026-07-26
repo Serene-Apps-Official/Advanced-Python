@@ -3,18 +3,43 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from html import escape
 
 # --- Page Configuration ---
 st.set_page_config(page_title="User Portal", page_icon="🔑")
 
 # --- SMTP Credentials Configuration ---
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 465  # SSL port for increased connection stability
-SENDER_EMAIL = "your_email@gmail.com"       # Replace with your Gmail address
-SENDER_PASSWORD = "your_16_char_app_pass"   # Replace with your 16-character Google App Password
+# NEVER hardcode credentials in source. Put these in .streamlit/secrets.toml (local)
+# or in your deployment's Secrets manager (Streamlit Community Cloud, etc):
+#
+#   [smtp]
+#   server = "smtp.gmail.com"
+#   port = 465
+#   sender_email = "your_email@gmail.com"
+#   sender_password = "your_16_char_app_pass"
+#
+# .streamlit/secrets.toml should be in .gitignore and never committed.
+try:
+    SMTP_SERVER = st.secrets["smtp"]["server"]
+    SMTP_PORT = int(st.secrets["smtp"]["port"])
+    SENDER_EMAIL = st.secrets["smtp"]["sender_email"]
+    SENDER_PASSWORD = st.secrets["smtp"]["sender_password"]
+    SMTP_CONFIGURED = True
+except Exception:
+    SMTP_CONFIGURED = False
+
 
 def send_welcome_email(recipient_email: str, username: str) -> bool:
     """Dispatches a personalized welcome email via secure SSL SMTP connection."""
+    if not SMTP_CONFIGURED:
+        st.error(
+            "Email is not configured. Add SMTP credentials to .streamlit/secrets.toml "
+            "(see comment at top of app.py)."
+        )
+        return False
+
+    safe_username = escape(username)
+
     msg = MIMEMultipart("alternative")
     msg["From"] = SENDER_EMAIL
     msg["To"] = recipient_email
@@ -24,7 +49,7 @@ def send_welcome_email(recipient_email: str, username: str) -> bool:
     html_content = f"""
     <html>
       <body>
-        <h2>Welcome, {username}!</h2>
+        <h2>Welcome, {safe_username}!</h2>
         <p>You have successfully logged in to the application.</p>
         <hr>
         <p><small>This is an automated notification.</small></p>
@@ -52,7 +77,15 @@ def send_welcome_email(recipient_email: str, username: str) -> bool:
         st.error(f"Email Dispatch Error: {str(e)}")
         return False
 
+
 # --- Initialize Session State from URL Query Parameters ---
+# NOTE ON SECURITY: this app treats "typed a name and email" as login, and
+# ?username=...&email=... in the URL as a way to resume that session in this
+# browser tab. It is NOT real authentication: there is no password check, no
+# server-side session store, and no proof the person owns that email address.
+# Anyone can edit the URL to claim any username/email. Do not use this pattern
+# to gate sensitive data or actions — swap in a real auth provider
+# (e.g. streamlit-authenticator, Auth0, Firebase Auth) before that's needed.
 query_params = st.query_params
 
 if "logged_in" not in st.session_state:
@@ -65,9 +98,19 @@ if "logged_in" not in st.session_state:
         st.session_state.username = ""
         st.session_state.user_email = ""
 
+if "welcome_email_sent" not in st.session_state:
+    # Guards against re-sending the welcome email on every rerun/resubmit
+    # for the same session (e.g. Streamlit reruns, browser refresh with the
+    # form still "submitted" in state).
+    st.session_state.welcome_email_sent = False
+
 # --- Interface Logic ---
 if not st.session_state.logged_in:
     st.title("🔐 Login")
+    st.caption(
+        "This form identifies you for this session only — it does not verify "
+        "that you own the email address you enter."
+    )
 
     with st.form("login_form"):
         username_input = st.text_input("Username", placeholder="Enter your username")
@@ -79,15 +122,20 @@ if not st.session_state.logged_in:
             clean_username = username_input.strip()
             clean_email = email_input.strip()
 
-            with st.spinner("Dispatching welcome email..."):
-                email_sent = send_welcome_email(clean_email, clean_username)
+            # Only send the welcome email once per new login, not on every rerun.
+            if not st.session_state.welcome_email_sent:
+                with st.spinner("Dispatching welcome email..."):
+                    email_sent = send_welcome_email(clean_email, clean_username)
+            else:
+                email_sent = True
 
             if email_sent:
                 st.session_state.logged_in = True
                 st.session_state.username = clean_username
                 st.session_state.user_email = clean_email
+                st.session_state.welcome_email_sent = True
 
-                # Persist authentication in URL parameters
+                # Persist session in URL parameters (see security note above).
                 st.query_params["username"] = clean_username
                 st.query_params["email"] = clean_email
 
@@ -109,5 +157,6 @@ else:
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.session_state.user_email = ""
+        st.session_state.welcome_email_sent = False
         st.rerun()
         
