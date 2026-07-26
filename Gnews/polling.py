@@ -1,19 +1,10 @@
 import streamlit as st
-import extra_streamlit_components as stx
 import smtplib
-import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- Page Configuration ---
 st.set_page_config(page_title="User Portal", page_icon="🔑")
-
-# --- Cookie Manager Initialization ---
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_cookie_manager()
 
 # --- SMTP Email Configuration ---
 SMTP_SERVER = "smtp.gmail.com"
@@ -46,27 +37,20 @@ def send_welcome_email(recipient_email: str, username: str) -> bool:
         st.error(f"Failed to send welcome email: {e}")
         return False
 
-# --- Persistent Session Check ---
-auth_cookie = cookie_manager.get(cookie="auth_user")
+# --- Initialize Session State from URL Query Parameters ---
+query_params = st.query_params
 
 if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "username" not in st.session_state:
-    st.session_state.username = ""
-if "user_email" not in st.session_state:
-    st.session_state.user_email = ""
-
-# Auto-login from persistent cookie if present
-if auth_cookie and not st.session_state.logged_in:
-    try:
-        user_data = json.loads(auth_cookie)
+    if "username" in query_params and "email" in query_params:
         st.session_state.logged_in = True
-        st.session_state.username = user_data.get("username", "")
-        st.session_state.user_email = user_data.get("email", "")
-    except Exception:
-        pass
+        st.session_state.username = query_params["username"]
+        st.session_state.user_email = query_params["email"]
+    else:
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.session_state.user_email = ""
 
-# --- Interface & Logic ---
+# --- Interface Logic ---
 if not st.session_state.logged_in:
     st.title("🔐 Login")
 
@@ -77,19 +61,20 @@ if not st.session_state.logged_in:
 
     if submit_button:
         if username_input.strip() and email_input.strip() and "@" in email_input:
-            st.session_state.logged_in = True
-            st.session_state.username = username_input.strip()
-            st.session_state.user_email = email_input.strip()
+            clean_username = username_input.strip()
+            clean_email = email_input.strip()
 
-            # Save login state to browser cookie (Expires in 30 days)
-            cookie_data = json.dumps({
-                "username": st.session_state.username,
-                "email": st.session_state.user_email
-            })
-            cookie_manager.set("auth_user", cookie_data, max_age=30*24*3600)
+            # Update session state
+            st.session_state.logged_in = True
+            st.session_state.username = clean_username
+            st.session_state.user_email = clean_email
+
+            # Save state into native query parameters for session persistence
+            st.query_params["username"] = clean_username
+            st.query_params["email"] = clean_email
 
             with st.spinner("Sending welcome email..."):
-                send_welcome_email(st.session_state.user_email, st.session_state.username)
+                send_welcome_email(clean_email, clean_username)
 
             st.rerun()
         else:
@@ -99,16 +84,16 @@ else:
     # --- Welcome Dashboard ---
     st.title(f"Welcome! {st.session_state.username}")
     st.success(f"Logged in as **{st.session_state.username}** ({st.session_state.user_email})")
-    
-    st.info("You will remain automatically logged in every time you open this website until you explicitly log out.")
+
+    st.info("Your login status is saved in the URL parameters and will persist upon revisiting.")
 
     st.divider()
 
     if st.button("Log Out", type="primary"):
-        # Clear cookies and reset state
-        cookie_manager.delete("auth_user")
+        # Clear URL parameters and reset session state
+        st.query_params.clear()
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.session_state.user_email = ""
         st.rerun()
-    
+        
