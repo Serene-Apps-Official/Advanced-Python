@@ -11,34 +11,16 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from html import escape
 
-# --- Page Configuration ---
 st.set_page_config(page_title="User Portal", page_icon="🔑", layout="wide")
 
-# --- Constants ---
 OTP_LENGTH = 4
 OTP_VALID_SECONDS = 5 * 60
 OTP_MAX_ATTEMPTS = 5
 RESEND_COOLDOWN_SECONDS = 30
 DB_PATH = os.path.join(os.path.dirname(__file__), "portal.db")
-CHAT_POLL_SECONDS = 3  # how often the open chat re-checks for new messages
-
-# --- NOTE ON STORAGE (read this before deploying) ---
-# This app stores accounts, contacts, and messages in a local SQLite file
-# (portal.db) sitting next to app.py. On Streamlit Community Cloud, the
-# filesystem persists while the app is running, but a redeploy (new commit,
-# reboot, or the app waking up on a new container after sleeping) can wipe it.
-# That means accounts, contacts, and message history can occasionally
-# disappear without warning. Fine for testing/demoing; for real production
-# use, swap this for a hosted database (Supabase, Postgres, Turso, etc.) that
-# lives outside the app's own container.
-#
-# NOTE ON "LIVE" CHAT: Streamlit has no true push/websocket model to arbitrary
-# clients, so this simulates live delivery by auto-refreshing the open chat
-# view every few seconds and re-reading messages from the database. There is
-# a small delay (a few seconds), not instant delivery like a real chat app.
+CHAT_POLL_SECONDS = 3
 
 
-# --- Database Setup ---
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -84,7 +66,6 @@ def init_db():
 init_db()
 
 
-# --- Password Hashing (PBKDF2, no plaintext passwords ever stored) ---
 def hash_password(password: str, salt: bytes = None) -> tuple[str, str]:
     if salt is None:
         salt = os.urandom(16)
@@ -116,14 +97,12 @@ def create_user(email: str, username: str, password: str):
     conn.close()
 
 
-# --- Contacts ---
 def add_contact(owner_email: str, contact_email: str):
     conn = get_connection()
     conn.execute(
         "INSERT OR IGNORE INTO contacts (owner_email, contact_email) VALUES (?, ?)",
         (owner_email, contact_email),
     )
-    # Make it mutual so both people see each other in their contact list.
     conn.execute(
         "INSERT OR IGNORE INTO contacts (owner_email, contact_email) VALUES (?, ?)",
         (contact_email, owner_email),
@@ -147,7 +126,6 @@ def get_contacts(owner_email: str):
     return rows
 
 
-# --- Messages ---
 def send_message(sender_email: str, recipient_email: str, body: str):
     conn = get_connection()
     conn.execute(
@@ -173,17 +151,6 @@ def get_conversation(email_a: str, email_b: str):
     return rows
 
 
-# --- SMTP Credentials Configuration ---
-# NEVER hardcode credentials in source. Put these in .streamlit/secrets.toml (local)
-# or in your deployment's Secrets manager (Streamlit Community Cloud, etc):
-#
-#   [smtp]
-#   server = "smtp.gmail.com"
-#   port = 465
-#   sender_email = "your_email@gmail.com"
-#   sender_password = "your_16_char_app_pass"
-#
-# .streamlit/secrets.toml should be in .gitignore and never committed.
 try:
     SMTP_SERVER = st.secrets["smtp"]["server"]
     SMTP_PORT = int(st.secrets["smtp"]["port"])
@@ -200,10 +167,7 @@ def generate_otp() -> str:
 
 def _send_email(recipient_email: str, subject: str, text_content: str, html_content: str) -> bool:
     if not SMTP_CONFIGURED:
-        st.error(
-            "Email is not configured. Add SMTP credentials to .streamlit/secrets.toml "
-            "(see comment near the top of app.py)."
-        )
+        st.error("Email is not configured.")
         return False
 
     msg = MIMEMultipart("alternative")
@@ -220,10 +184,10 @@ def _send_email(recipient_email: str, subject: str, text_content: str, html_cont
             server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
         return True
     except smtplib.SMTPAuthenticationError:
-        st.error("SMTP Authentication Failed: Ensure you are using an App Password instead of your regular account password.")
+        st.error("SMTP Authentication Failed.")
         return False
     except smtplib.SMTPConnectError:
-        st.error("SMTP Connection Failed: Unable to reach the mail server. Check network or firewall settings.")
+        st.error("SMTP Connection Failed.")
         return False
     except Exception as e:
         st.error(f"Email Dispatch Error: {str(e)}")
@@ -236,7 +200,6 @@ def send_otp_email(recipient_email: str, username: str, code: str) -> bool:
         f"Hello {username},\n\n"
         f"Your verification code is: {code}\n\n"
         f"This code expires in {OTP_VALID_SECONDS // 60} minutes.\n\n"
-        f"If you did not request this, you can ignore this email.\n\n"
         f"Best regards,\nThe Team"
     )
     html_content = f"""
@@ -245,7 +208,6 @@ def send_otp_email(recipient_email: str, username: str, code: str) -> bool:
         <p>Your verification code is:</p>
         <h1 style="letter-spacing: 6px;">{code}</h1>
         <p>This code expires in {OTP_VALID_SECONDS // 60} minutes.</p>
-        <hr><p><small>If you did not request this, you can ignore this email.</small></p>
     </body></html>
     """
     return _send_email(recipient_email, f"Your verification code: {code}", text_content, html_content)
@@ -258,13 +220,11 @@ def send_welcome_email(recipient_email: str, username: str) -> bool:
     <html><body>
         <h2>Welcome, {safe_username}!</h2>
         <p>Your account has been created and verified.</p>
-        <hr><p><small>This is an automated notification.</small></p>
     </body></html>
     """
     return _send_email(recipient_email, f"Welcome to the Portal, {username}!", text_content, html_content)
 
 
-# --- Session State Setup ---
 query_params = st.query_params
 
 if "logged_in" not in st.session_state:
@@ -304,7 +264,6 @@ def reset_otp_state():
     st.session_state.pending_password = ""
 
 
-# --- Interface Logic ---
 if not st.session_state.logged_in:
 
     if not st.session_state.otp_pending:
@@ -313,7 +272,6 @@ if not st.session_state.logged_in:
         tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
 
         with tab_login:
-            st.caption("Already have an account? Enter your email and password.")
             with st.form("login_form"):
                 login_email = st.text_input("Email Address", placeholder="name@example.com", key="login_email")
                 login_password = st.text_input("Password", type="password", key="login_password")
@@ -337,7 +295,6 @@ if not st.session_state.logged_in:
                     st.rerun()
 
         with tab_signup:
-            st.caption("New here? Create an account — we'll verify your email with a code first.")
             with st.form("signup_form"):
                 signup_username = st.text_input("Username", placeholder="Enter your username", key="signup_username")
                 signup_email = st.text_input("Email Address", placeholder="name@example.com", key="signup_email")
@@ -447,7 +404,6 @@ if not st.session_state.logged_in:
                 st.rerun()
 
 else:
-    # --- Chat Dashboard ---
     my_email = st.session_state.user_email
 
     top_left, top_right = st.columns([4, 1])
@@ -465,7 +421,6 @@ else:
 
     col_contacts, col_chat = st.columns([1, 2.5], gap="medium")
 
-    # --- Contacts Pane ---
     with col_contacts:
         st.subheader("Contacts")
 
@@ -506,7 +461,6 @@ else:
                     st.session_state.active_contact_email = contact["email"]
                     st.rerun()
 
-    # --- Chat Pane ---
     with col_chat:
         active_email = st.session_state.active_contact_email
 
@@ -522,27 +476,45 @@ else:
 
             with chat_box:
                 if not messages:
-                   st.caption("No messages yet. Say hello!")
-
-            for m in messages:
-               is_mine = m["sender_email"] == my_email
-               bubble_color = "#DCF8C6" if is_mine else "#FFFFFF"
-               sender_label = "You" if is_mine else active_name
-               timestamp = time.strftime("%H:%M", time.localtime(m["sent_at"]))
-
+                    st.caption("No messages yet. Say hello!")
+                for m in messages:
+                    is_mine = m["sender_email"] == my_email
+                    bubble_color = "#DCF8C6" if is_mine else "#FFFFFF"
+                    sender_label = "You" if is_mine else active_name
+                    timestamp = time.strftime("%H:%M", time.localtime(m["sent_at"]))
+                    st.markdown(
+                        f"""
+                        <div style="display:flex; justify-content:{'flex-end' if is_mine else 'flex-start'}; margin:4px 0;">
+                          <div style="background:{bubble_color}; border-radius:10px; padding:8px 12px;
+                                      max-width:70%; box-shadow:0 1px 2px rgba(0,0,0,0.15);">
+                            <div style="font-size:0.75em; color:#555; margin-bottom:2px;">{escape(sender_label)}</div>
+                            <div style="white-space:pre-wrap; word-wrap:break-word;">{escape(m['body'])}</div>
+                            <div style="font-size:0.7em; color:#888; text-align:right; margin-top:2px;">{timestamp}</div>
+                          </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
             with st.form("send_message_form", clear_on_submit=True):
-              msg_col, btn_col = st.columns([5, 1])
-
-              with msg_col:
-                new_message = st.text_input("Message",placeholder="Type a message...",label_visibility="collapsed")
-
-              with btn_col:
-                send_submit = st.form_submit_button("Send",use_container_width=True)
+                msg_col, btn_col = st.columns([5, 1])
+                with msg_col:
+                    new_message = st.text_input(
+                        "Message",
+                        placeholder="Type a message...",
+                        label_visibility="collapsed",
+                    )
+                with btn_col:
+                    send_submit = st.form_submit_button("Send", use_container_width=True)
 
             if send_submit and new_message.strip():
-              send_message(my_email,active_email,new_message.strip())
-              st.rerun()
+                send_message(my_email, active_email, new_message.strip())
+                st.rerun()
 
-            time.sleep(CHAT_POLL_SECONDS)
-            st.rerun()
+            refresh_col, status_col = st.columns([1, 3])
+            with refresh_col:
+                if st.button("🔄 Refresh"):
+                    st.rerun()
+            with status_col:
+                st.caption("Tap Refresh to check for new messages.")
+                    
