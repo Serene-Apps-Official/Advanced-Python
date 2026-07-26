@@ -530,25 +530,19 @@ else:
                sender_label = "You" if is_mine else active_name
                timestamp = time.strftime("%H:%M", time.localtime(m["sent_at"]))
 
-   with st.markdown(
-        f"""
-        <div style="display:flex; justify-content:{'flex-end' if is_mine else 'flex-start'}; margin:4px 0;">
-          <div style="background:{bubble_color};
-                      border-radius:10px;
-                      padding:8px 12px;
-                      max-width:70%;
-                      box-shadow:0 1px 2px rgba(0,0,0,0.15);">
-            <div style="font-size:0.75em; color:#555; margin-bottom:2px;">
-                {escape(sender_label)}
-            </div>
-            <div style="white-space:pre-wrap; word-wrap:break-word;">
-                {escape(m['body'])}
-            </div>
-            <div style="font-size:0.7em; color:#888; text-align:right; margin-top:2px;">
-                {timestamp}
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+
+            with st.form("send_message_form", clear_on_submit=True):
+              msg_col, btn_col = st.columns([5, 1])
+
+              with msg_col:
+                new_message = st.text_input("Message",placeholder="Type a message...",label_visibility="collapsed")
+
+              with btn_col:
+                send_submit = st.form_submit_button("Send",use_container_width=True)
+
+            if send_submit and new_message.strip():
+              send_message(my_email,active_email,new_message.strip())
+              st.rerun()
+
+            time.sleep(CHAT_POLL_SECONDS)
+            st.rerun()
