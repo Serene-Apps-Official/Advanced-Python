@@ -12,7 +12,7 @@ from email.mime.multipart import MIMEMultipart
 from html import escape
 
 # --- Page Configuration ---
-st.set_page_config(page_title="User Portal", page_icon="🔑")
+st.set_page_config(page_title="User Portal", page_icon="🔑", layout="wide")
 
 # --- Constants ---
 OTP_LENGTH = 4
@@ -20,19 +20,22 @@ OTP_VALID_SECONDS = 5 * 60
 OTP_MAX_ATTEMPTS = 5
 RESEND_COOLDOWN_SECONDS = 30
 DB_PATH = os.path.join(os.path.dirname(__file__), "portal.db")
+CHAT_POLL_SECONDS = 3  # how often the open chat re-checks for new messages
 
 # --- NOTE ON STORAGE (read this before deploying) ---
-# This app stores accounts in a local SQLite file (portal.db) sitting next to
-# app.py. On Streamlit Community Cloud, the filesystem persists while the app
-# is running, but a redeploy (new commit, reboot, or the app going to sleep
-# and waking back up on a new container) can wipe it. That means accounts and
-# saved notes can occasionally disappear without warning.
+# This app stores accounts, contacts, and messages in a local SQLite file
+# (portal.db) sitting next to app.py. On Streamlit Community Cloud, the
+# filesystem persists while the app is running, but a redeploy (new commit,
+# reboot, or the app waking up on a new container after sleeping) can wipe it.
+# That means accounts, contacts, and message history can occasionally
+# disappear without warning. Fine for testing/demoing; for real production
+# use, swap this for a hosted database (Supabase, Postgres, Turso, etc.) that
+# lives outside the app's own container.
 #
-# This is fine for testing/demoing. For real production use with accounts you
-# expect to keep, swap this for a hosted database (e.g. Supabase, Postgres,
-# Turso) that lives outside the app's own container. The functions below
-# (get_user, create_user, verify_password, save_user_note) are the only ones
-# that touch storage — replacing the DB just means rewriting those.
+# NOTE ON "LIVE" CHAT: Streamlit has no true push/websocket model to arbitrary
+# clients, so this simulates live delivery by auto-refreshing the open chat
+# view every few seconds and re-reading messages from the database. There is
+# a small delay (a few seconds), not instant delivery like a real chat app.
 
 
 # --- Database Setup ---
@@ -50,8 +53,27 @@ def init_db():
             email TEXT PRIMARY KEY,
             username TEXT NOT NULL,
             password_hash TEXT NOT NULL,
-            password_salt TEXT NOT NULL,
-            note TEXT DEFAULT ''
+            password_salt TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS contacts (
+            owner_email TEXT NOT NULL,
+            contact_email TEXT NOT NULL,
+            PRIMARY KEY (owner_email, contact_email)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_email TEXT NOT NULL,
+            recipient_email TEXT NOT NULL,
+            body TEXT NOT NULL,
+            sent_at REAL NOT NULL
         )
         """
     )
@@ -87,18 +109,68 @@ def create_user(email: str, username: str, password: str):
     pw_hash, salt = hash_password(password)
     conn = get_connection()
     conn.execute(
-        "INSERT INTO users (email, username, password_hash, password_salt, note) VALUES (?, ?, ?, ?, '')",
+        "INSERT INTO users (email, username, password_hash, password_salt) VALUES (?, ?, ?, ?)",
         (email, username, pw_hash, salt),
     )
     conn.commit()
     conn.close()
 
 
-def save_user_note(email: str, note: str):
+# --- Contacts ---
+def add_contact(owner_email: str, contact_email: str):
     conn = get_connection()
-    conn.execute("UPDATE users SET note = ? WHERE email = ?", (note, email))
+    conn.execute(
+        "INSERT OR IGNORE INTO contacts (owner_email, contact_email) VALUES (?, ?)",
+        (owner_email, contact_email),
+    )
+    # Make it mutual so both people see each other in their contact list.
+    conn.execute(
+        "INSERT OR IGNORE INTO contacts (owner_email, contact_email) VALUES (?, ?)",
+        (contact_email, owner_email),
+    )
     conn.commit()
     conn.close()
+
+
+def get_contacts(owner_email: str):
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT u.email, u.username FROM contacts c
+        JOIN users u ON u.email = c.contact_email
+        WHERE c.owner_email = ?
+        ORDER BY u.username COLLATE NOCASE
+        """,
+        (owner_email,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+# --- Messages ---
+def send_message(sender_email: str, recipient_email: str, body: str):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO messages (sender_email, recipient_email, body, sent_at) VALUES (?, ?, ?, ?)",
+        (sender_email, recipient_email, body, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_conversation(email_a: str, email_b: str):
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT * FROM messages
+        WHERE (sender_email = ? AND recipient_email = ?)
+           OR (sender_email = ? AND recipient_email = ?)
+        ORDER BY sent_at ASC
+        """,
+        (email_a, email_b, email_b, email_a),
+    ).fetchall()
+    conn.close()
+    return rows
 
 
 # --- SMTP Credentials Configuration ---
@@ -193,12 +265,6 @@ def send_welcome_email(recipient_email: str, username: str) -> bool:
 
 
 # --- Session State Setup ---
-# NOTE ON SECURITY: login persists via URL query params (?email=...) purely so
-# a refreshed tab stays logged in. The query param itself is not treated as
-# proof of identity for anything sensitive — the password check only happens
-# at actual login time, and the note-saving action just uses whatever email
-# is currently in session. Don't extend this pattern to gate highly sensitive
-# actions without a proper server-side session/token system.
 query_params = st.query_params
 
 if "logged_in" not in st.session_state:
@@ -213,7 +279,7 @@ if "logged_in" not in st.session_state:
         st.session_state.user_email = ""
 
 for key, default in {
-    "mode": "login",            # "login" or "signup"
+    "mode": "login",
     "otp_pending": False,
     "otp_code": None,
     "otp_sent_at": None,
@@ -221,6 +287,8 @@ for key, default in {
     "pending_username": "",
     "pending_email": "",
     "pending_password": "",
+    "active_contact_email": None,
+    "show_add_contact": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -244,7 +312,6 @@ if not st.session_state.logged_in:
 
         tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
 
-        # --- LOG IN TAB ---
         with tab_login:
             st.caption("Already have an account? Enter your email and password.")
             with st.form("login_form"):
@@ -269,7 +336,6 @@ if not st.session_state.logged_in:
                     st.query_params["email"] = user["email"]
                     st.rerun()
 
-        # --- SIGN UP TAB ---
         with tab_signup:
             st.caption("New here? Create an account — we'll verify your email with a code first.")
             with st.form("signup_form"):
@@ -306,7 +372,6 @@ if not st.session_state.logged_in:
                         st.rerun()
 
     else:
-        # --- OTP VERIFICATION STEP (sign-up only) ---
         st.title("🔐 Verify Your Email")
         st.caption(f"We sent a {OTP_LENGTH}-digit code to **{st.session_state.pending_email}**.")
 
@@ -382,30 +447,78 @@ if not st.session_state.logged_in:
                 st.rerun()
 
 else:
-    # --- Dashboard View ---
-    st.title(f"Welcome! {st.session_state.username}")
-    st.success(f"Logged in as **{st.session_state.username}** ({st.session_state.user_email})")
+    # --- Chat Dashboard ---
+    my_email = st.session_state.user_email
 
-    st.divider()
+    top_left, top_right = st.columns([4, 1])
+    with top_left:
+        st.title(f"💬 {st.session_state.username}")
+    with top_right:
+        if st.button("Log Out"):
+            st.query_params.clear()
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.session_state.user_email = ""
+            st.session_state.active_contact_email = None
+            reset_otp_state()
+            st.rerun()
 
-    st.subheader("📝 Your Notes")
-    user = get_user(st.session_state.user_email)
-    existing_note = user["note"] if user else ""
+    col_contacts, col_chat = st.columns([1, 2.5], gap="medium")
 
-    note_input = st.text_area("Write something and save it:", value=existing_note, height=150)
+    # --- Contacts Pane ---
+    with col_contacts:
+        st.subheader("Contacts")
 
-    if st.button("Save", type="primary"):
-        save_user_note(st.session_state.user_email, note_input)
-        st.success("Saved!")
-        st.rerun()
+        if st.button("➕ Add Contact", use_container_width=True):
+            st.session_state.show_add_contact = not st.session_state.show_add_contact
 
-    st.divider()
+        if st.session_state.show_add_contact:
+            with st.form("add_contact_form", clear_on_submit=True):
+                new_contact_email = st.text_input("Contact's email", placeholder="name@example.com")
+                add_submit = st.form_submit_button("Add")
 
-    if st.button("Log Out"):
-        st.query_params.clear()
-        st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.session_state.user_email = ""
-        reset_otp_state()
-        st.rerun()
-    
+            if add_submit:
+                clean_contact_email = new_contact_email.strip()
+                if not clean_contact_email:
+                    st.error("Please enter an email address.")
+                elif clean_contact_email == my_email:
+                    st.error("You can't add yourself as a contact.")
+                elif get_user(clean_contact_email) is None:
+                    st.error("No account exists with that email.")
+                else:
+                    add_contact(my_email, clean_contact_email)
+                    st.session_state.show_add_contact = False
+                    st.success("Contact added.")
+                    st.rerun()
+
+        contacts = get_contacts(my_email)
+        if not contacts:
+            st.caption("No contacts yet. Add one to start chatting.")
+        else:
+            for contact in contacts:
+                label = contact["username"]
+                is_active = st.session_state.active_contact_email == contact["email"]
+                if st.button(
+                    ("👉 " if is_active else "") + label,
+                    key=f"contact_{contact['email']}",
+                    use_container_width=True,
+                ):
+                    st.session_state.active_contact_email = contact["email"]
+                    st.rerun()
+
+    # --- Chat Pane ---
+    with col_chat:
+        active_email = st.session_state.active_contact_email
+
+        if not active_email:
+            st.info("Select a contact on the left, or add a new one, to start chatting.")
+        else:
+            active_user = get_user(active_email)
+            active_name = active_user["username"] if active_user else active_email
+            st.subheader(f"Chat with {active_name}")
+
+            chat_box = st.container(height=400)
+            messages = get_conversation(my_email, active_email)
+
+            with chat_box:
+                if 
