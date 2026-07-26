@@ -1,40 +1,55 @@
 import streamlit as st
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- Page Configuration ---
 st.set_page_config(page_title="User Portal", page_icon="🔑")
 
-# --- SMTP Email Configuration ---
+# --- SMTP Credentials Configuration ---
 SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SENDER_EMAIL = "your_email@gmail.com"      # Replace with your SMTP email
-SENDER_PASSWORD = "your_app_password"       # Replace with your SMTP App Password
+SMTP_PORT = 465  # SSL port for increased connection stability
+SENDER_EMAIL = "your_email@gmail.com"       # Replace with your Gmail address
+SENDER_PASSWORD = "your_16_char_app_pass"   # Replace with your 16-character Google App Password
 
 def send_welcome_email(recipient_email: str, username: str) -> bool:
-    """Dispatches a personalized welcome email via SMTP."""
+    """Dispatches a personalized welcome email via secure SSL SMTP connection."""
+    msg = MIMEMultipart("alternative")
+    msg["From"] = SENDER_EMAIL
+    msg["To"] = recipient_email
+    msg["Subject"] = f"Welcome to the Portal, {username}!"
+
+    text_content = f"Hello {username},\n\nWelcome! You have successfully logged in.\n\nBest regards,\nThe Team"
+    html_content = f"""
+    <html>
+      <body>
+        <h2>Welcome, {username}!</h2>
+        <p>You have successfully logged in to the application.</p>
+        <hr>
+        <p><small>This is an automated notification.</small></p>
+      </body>
+    </html>
+    """
+
+    msg.attach(MIMEText(text_content, "plain"))
+    msg.attach(MIMEText(html_content, "html"))
+
+    context = ssl.create_default_context()
+
     try:
-        msg = MIMEMultipart()
-        msg["From"] = SENDER_EMAIL
-        msg["To"] = recipient_email
-        msg["Subject"] = f"Welcome, {username}!"
-
-        body = (
-            f"Hello {username},\n\n"
-            f"Welcome to our platform! You have successfully logged in.\n\n"
-            f"Best regards,\nThe System Team"
-        )
-        msg.attach(MIMEText(body, "plain"))
-
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
-        server.quit()
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context, timeout=10) as server:
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
         return True
+    except smtplib.SMTPAuthenticationError:
+        st.error("SMTP Authentication Failed: Ensure you are using an App Password instead of your regular account password.")
+        return False
+    except smtplib.SMTPConnectError:
+        st.error("SMTP Connection Failed: Unable to reach the mail server. Check network or firewall settings.")
+        return False
     except Exception as e:
-        st.error(f"Failed to send welcome email: {e}")
+        st.error(f"Email Dispatch Error: {str(e)}")
         return False
 
 # --- Initialize Session State from URL Query Parameters ---
@@ -64,33 +79,32 @@ if not st.session_state.logged_in:
             clean_username = username_input.strip()
             clean_email = email_input.strip()
 
-            # Update session state
-            st.session_state.logged_in = True
-            st.session_state.username = clean_username
-            st.session_state.user_email = clean_email
+            with st.spinner("Dispatching welcome email..."):
+                email_sent = send_welcome_email(clean_email, clean_username)
 
-            # Save state into native query parameters for session persistence
-            st.query_params["username"] = clean_username
-            st.query_params["email"] = clean_email
+            if email_sent:
+                st.session_state.logged_in = True
+                st.session_state.username = clean_username
+                st.session_state.user_email = clean_email
 
-            with st.spinner("Sending welcome email..."):
-                send_welcome_email(clean_email, clean_username)
+                # Persist authentication in URL parameters
+                st.query_params["username"] = clean_username
+                st.query_params["email"] = clean_email
 
-            st.rerun()
+                st.rerun()
         else:
-            st.error("Please provide both a valid username and email address.")
+            st.error("Please enter a valid username and email address.")
 
 else:
-    # --- Welcome Dashboard ---
+    # --- Dashboard View ---
     st.title(f"Welcome! {st.session_state.username}")
     st.success(f"Logged in as **{st.session_state.username}** ({st.session_state.user_email})")
 
-    st.info("Your login status is saved in the URL parameters and will persist upon revisiting.")
+    st.info("Your session will remain active upon reopening this site until you log out.")
 
     st.divider()
 
     if st.button("Log Out", type="primary"):
-        # Clear URL parameters and reset session state
         st.query_params.clear()
         st.session_state.logged_in = False
         st.session_state.username = ""
