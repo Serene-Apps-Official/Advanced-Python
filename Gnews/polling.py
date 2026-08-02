@@ -1,520 +1,468 @@
 import streamlit as st
-import smtplib
-import ssl
-import random
-import time
-import sqlite3
-import hashlib
-import hmac
-import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from html import escape
+import datetime
+import base64
+import database as db
 
-st.set_page_config(page_title="User Portal", page_icon="🔑", layout="wide")
+st.set_page_config(
+    page_title="The Book Desk — Shaikh Zulqarnain",
+    page_icon="📚",
+    layout="centered",
+    initial_sidebar_state="collapsed",
+)
 
-OTP_LENGTH = 4
-OTP_VALID_SECONDS = 5 * 60
-OTP_MAX_ATTEMPTS = 5
-RESEND_COOLDOWN_SECONDS = 30
-DB_PATH = os.path.join(os.path.dirname(__file__), "portal.db")
-CHAT_POLL_SECONDS = 3
+db.init_db()
 
+# =========================================================================
+# DESIGN SYSTEM — "Library Hold Desk"
+# Deep library green, parchment, brass ticket accents. Serif catalog
+# headers over clean sans body. Reservations render as numbered hold tickets.
+# =========================================================================
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
 
+:root {
+    --ink: #22303C;
+    --parchment: #F7F3E9;
+    --parchment-deep: #EFE8D8;
+    --green: #1B4332;
+    --green-deep: #12291F;
+    --sage: #84A98C;
+    --brass: #B8860B;
+    --brass-light: #D4A62A;
+    --red: #B23A2E;
+    --line: rgba(34,48,60,0.14);
+}
 
-def init_db():
-    conn = get_connection()
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
-            password_salt TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS contacts (
-            owner_email TEXT NOT NULL,
-            contact_email TEXT NOT NULL,
-            PRIMARY KEY (owner_email, contact_email)
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_email TEXT NOT NULL,
-            recipient_email TEXT NOT NULL,
-            body TEXT NOT NULL,
-            sent_at REAL NOT NULL
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; color: var(--ink); }
+.stApp { background: var(--parchment); }
 
+h1, h2, h3 { font-family: 'Lora', serif !important; color: var(--green-deep); letter-spacing: -0.01em; }
 
-init_db()
+/* Header block */
+.desk-header {
+    border-bottom: 2px solid var(--green-deep);
+    padding-bottom: 18px;
+    margin-bottom: 28px;
+}
+.desk-eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 500;
+}
+.desk-title {
+    font-family: 'Lora', serif;
+    font-weight: 700;
+    font-size: 2.1rem;
+    color: var(--green-deep);
+    margin: 4px 0 2px 0;
+}
+.desk-sub {
+    font-size: 0.92rem;
+    color: rgba(34,48,60,0.65);
+}
 
+/* Ticket card — the signature element */
+.ticket {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-left: 5px solid var(--green);
+    border-radius: 6px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    position: relative;
+    box-shadow: 0 1px 3px rgba(34,48,60,0.06);
+}
+.ticket.mine { border-left-color: var(--brass); background: #FFFDF6; }
+.ticket-pos {
+    font-family: 'Lora', serif;
+    font-weight: 700;
+    font-size: 1.6rem;
+    color: var(--green-deep);
+    float: right;
+    line-height: 1;
+    opacity: 0.85;
+}
+.ticket-pos.first { color: var(--brass); }
+.ticket-name { font-weight: 600; font-size: 1.02rem; }
+.ticket-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    color: rgba(34,48,60,0.6);
+    margin-top: 4px;
+}
 
-def hash_password(password: str, salt: bytes = None) -> tuple[str, str]:
-    if salt is None:
-        salt = os.urandom(16)
-    pw_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
-    return pw_hash.hex(), salt.hex()
+/* Book card in catalog */
+.book-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+}
+.book-card .subject { font-family: 'Lora', serif; font-weight: 600; font-size: 1.05rem; color: var(--green-deep); }
+.book-card .item-type { font-size: 0.85rem; color: rgba(34,48,60,0.6); }
+.queue-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: var(--parchment-deep);
+    color: var(--green-deep);
+    float: right;
+}
+.queue-badge.empty { background: rgba(132,169,140,0.18); color: var(--sage); }
+.queue-badge.busy { background: rgba(178,58,46,0.1); color: var(--red); }
 
+/* Buttons */
+.stButton>button {
+    background: var(--green) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    padding: 0.55rem 1.4rem !important;
+    transition: background 0.15s ease;
+}
+.stButton>button:hover { background: var(--green-deep) !important; }
 
-def verify_password(password: str, stored_hash: str, stored_salt: str) -> bool:
-    salt = bytes.fromhex(stored_salt)
-    new_hash, _ = hash_password(password, salt)
-    return hmac.compare_digest(new_hash, stored_hash)
+/* Divider */
+.thin-rule { border: none; border-top: 1px solid var(--line); margin: 22px 0; }
 
-
-def get_user(email: str):
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-    conn.close()
-    return row
-
-
-def create_user(email: str, username: str, password: str):
-    pw_hash, salt = hash_password(password)
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO users (email, username, password_hash, password_salt) VALUES (?, ?, ?, ?)",
-        (email, username, pw_hash, salt),
-    )
-    conn.commit()
-    conn.close()
-
-
-def add_contact(owner_email: str, contact_email: str):
-    conn = get_connection()
-    conn.execute(
-        "INSERT OR IGNORE INTO contacts (owner_email, contact_email) VALUES (?, ?)",
-        (owner_email, contact_email),
-    )
-    conn.execute(
-        "INSERT OR IGNORE INTO contacts (owner_email, contact_email) VALUES (?, ?)",
-        (contact_email, owner_email),
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_contacts(owner_email: str):
-    conn = get_connection()
-    rows = conn.execute(
-        """
-        SELECT u.email, u.username FROM contacts c
-        JOIN users u ON u.email = c.contact_email
-        WHERE c.owner_email = ?
-        ORDER BY u.username COLLATE NOCASE
-        """,
-        (owner_email,),
-    ).fetchall()
-    conn.close()
-    return rows
-
-
-def send_message(sender_email: str, recipient_email: str, body: str):
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO messages (sender_email, recipient_email, body, sent_at) VALUES (?, ?, ?, ?)",
-        (sender_email, recipient_email, body, time.time()),
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_conversation(email_a: str, email_b: str):
-    conn = get_connection()
-    rows = conn.execute(
-        """
-        SELECT * FROM messages
-        WHERE (sender_email = ? AND recipient_email = ?)
-           OR (sender_email = ? AND recipient_email = ?)
-        ORDER BY sent_at ASC
-        """,
-        (email_a, email_b, email_b, email_a),
-    ).fetchall()
-    conn.close()
-    return rows
+/* Empty state */
+.empty-note {
+    font-style: italic;
+    color: rgba(34,48,60,0.5);
+    font-size: 0.9rem;
+    padding: 10px 0;
+}
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
 
 
-try:
-    SMTP_SERVER = st.secrets["smtp"]["server"]
-    SMTP_PORT = int(st.secrets["smtp"]["port"])
-    SENDER_EMAIL = st.secrets["smtp"]["sender_email"]
-    SENDER_PASSWORD = st.secrets["smtp"]["sender_password"]
-    SMTP_CONFIGURED = True
-except Exception:
-    SMTP_CONFIGURED = False
+# =========================================================================
+# Helpers
+# =========================================================================
+
+def render_header(eyebrow, title, sub):
+    st.markdown(f"""
+    <div class="desk-header">
+        <div class="desk-eyebrow">{eyebrow}</div>
+        <div class="desk-title">{title}</div>
+        <div class="desk-sub">{sub}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
-def generate_otp() -> str:
-    return "".join(random.choices("0123456789", k=OTP_LENGTH))
-
-
-def _send_email(recipient_email: str, subject: str, text_content: str, html_content: str) -> bool:
-    if not SMTP_CONFIGURED:
-        st.error("Email is not configured.")
-        return False
-
-    msg = MIMEMultipart("alternative")
-    msg["From"] = SENDER_EMAIL
-    msg["To"] = recipient_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(text_content, "plain"))
-    msg.attach(MIMEText(html_content, "html"))
-
-    context = ssl.create_default_context()
+def days_until(date_str):
     try:
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context, timeout=10) as server:
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
-        return True
-    except smtplib.SMTPAuthenticationError:
-        st.error("SMTP Authentication Failed.")
-        return False
-    except smtplib.SMTPConnectError:
-        st.error("SMTP Connection Failed.")
-        return False
-    except Exception as e:
-        st.error(f"Email Dispatch Error: {str(e)}")
-        return False
+        target = datetime.date.fromisoformat(date_str)
+        return (target - datetime.date.today()).days
+    except Exception:
+        return None
 
 
-def send_otp_email(recipient_email: str, username: str, code: str) -> bool:
-    safe_username = escape(username)
-    text_content = (
-        f"Hello {username},\n\n"
-        f"Your verification code is: {code}\n\n"
-        f"This code expires in {OTP_VALID_SECONDS // 60} minutes.\n\n"
-        f"Best regards,\nThe Team"
+def render_queue_badge_html(count):
+    if count == 0:
+        return '<span class="queue-badge empty">available</span>'
+    elif count >= 2:
+        return f'<span class="queue-badge busy">{count} waiting</span>'
+    else:
+        return f'<span class="queue-badge">{count} waiting</span>'
+
+
+# =========================================================================
+# Navigation
+# =========================================================================
+
+if "view" not in st.session_state:
+    st.session_state.view = "reserve"
+
+top_l, top_r = st.columns([3, 1])
+with top_r:
+    nav_choice = st.selectbox(
+        "Go to",
+        ["Reserve a book", "My reservations", "Admin"],
+        label_visibility="collapsed",
+        index=["Reserve a book", "My reservations", "Admin"].index(
+            {"reserve": "Reserve a book", "mine": "My reservations", "admin": "Admin"}[st.session_state.view]
+        ),
     )
-    html_content = f"""
-    <html><body>
-        <h2>Verify your email, {safe_username}</h2>
-        <p>Your verification code is:</p>
-        <h1 style="letter-spacing: 6px;">{code}</h1>
-        <p>This code expires in {OTP_VALID_SECONDS // 60} minutes.</p>
-    </body></html>
-    """
-    return _send_email(recipient_email, f"Your verification code: {code}", text_content, html_content)
+    st.session_state.view = {"Reserve a book": "reserve", "My reservations": "mine", "Admin": "admin"}[nav_choice]
 
 
-def send_welcome_email(recipient_email: str, username: str) -> bool:
-    safe_username = escape(username)
-    text_content = f"Hello {username},\n\nYour account has been created and verified. Welcome!\n\nBest regards,\nThe Team"
-    html_content = f"""
-    <html><body>
-        <h2>Welcome, {safe_username}!</h2>
-        <p>Your account has been created and verified.</p>
-    </body></html>
-    """
-    return _send_email(recipient_email, f"Welcome to the Portal, {username}!", text_content, html_content)
+# =========================================================================
+# VIEW: Reserve a book
+# =========================================================================
 
+if st.session_state.view == "reserve":
+    render_header(
+        "Shaikh Zulqarnain · 10th A",
+        "The Book Desk",
+        "Reserve a notebook or digest ahead of time — first to reserve gets it first."
+    )
 
-query_params = st.query_params
+    counts = db.reservation_counts_by_book()
+    items = db.all_book_items()
 
-if "logged_in" not in st.session_state:
-    if "email" in query_params and get_user(query_params["email"]):
-        user = get_user(query_params["email"])
-        st.session_state.logged_in = True
-        st.session_state.username = user["username"]
-        st.session_state.user_email = user["email"]
-    else:
-        st.session_state.logged_in = False
-        st.session_state.username = ""
-        st.session_state.user_email = ""
+    with st.form("reservation_form", clear_on_submit=False):
+        st.markdown("**Who are you?**")
+        student_name = st.selectbox("Student name", db.STUDENTS, label_visibility="collapsed")
 
-for key, default in {
-    "mode": "login",
-    "otp_pending": False,
-    "otp_code": None,
-    "otp_sent_at": None,
-    "otp_attempts": 0,
-    "pending_username": "",
-    "pending_email": "",
-    "pending_password": "",
-    "active_contact_email": None,
-    "show_add_contact": False,
-}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
+        st.markdown("**Which book do you need?**")
+        item_labels = [it["label"] for it in items]
+        chosen_label = st.selectbox("Book needed", item_labels, label_visibility="collapsed")
+        chosen_item = next(it for it in items if it["label"] == chosen_label)
 
-
-def reset_otp_state():
-    st.session_state.otp_pending = False
-    st.session_state.otp_code = None
-    st.session_state.otp_sent_at = None
-    st.session_state.otp_attempts = 0
-    st.session_state.pending_username = ""
-    st.session_state.pending_email = ""
-    st.session_state.pending_password = ""
-
-
-if not st.session_state.logged_in:
-
-    if not st.session_state.otp_pending:
-        st.title("🔐 " + ("Sign Up" if st.session_state.mode == "signup" else "Log In"))
-
-        tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
-
-        with tab_login:
-            with st.form("login_form"):
-                login_email = st.text_input("Email Address", placeholder="name@example.com", key="login_email")
-                login_password = st.text_input("Password", type="password", key="login_password")
-                login_submit = st.form_submit_button("Log In")
-
-            if login_submit:
-                clean_email = login_email.strip()
-                user = get_user(clean_email) if clean_email else None
-
-                if not clean_email or not login_password:
-                    st.error("Please enter both email and password.")
-                elif user is None:
-                    st.error("No account found with that email. Try signing up instead.")
-                elif not verify_password(login_password, user["password_hash"], user["password_salt"]):
-                    st.error("Incorrect password.")
-                else:
-                    st.session_state.logged_in = True
-                    st.session_state.username = user["username"]
-                    st.session_state.user_email = user["email"]
-                    st.query_params["email"] = user["email"]
-                    st.rerun()
-
-        with tab_signup:
-            with st.form("signup_form"):
-                signup_username = st.text_input("Username", placeholder="Enter your username", key="signup_username")
-                signup_email = st.text_input("Email Address", placeholder="name@example.com", key="signup_email")
-                signup_password = st.text_input("Choose a Password", type="password", key="signup_password")
-                signup_password_confirm = st.text_input("Confirm Password", type="password", key="signup_password_confirm")
-                signup_submit = st.form_submit_button("Send Verification Code")
-
-            if signup_submit:
-                clean_username = signup_username.strip()
-                clean_email = signup_email.strip()
-
-                if not (clean_username and clean_email and "@" in clean_email and signup_password):
-                    st.error("Please fill in all fields with a valid email.")
-                elif len(signup_password) < 8:
-                    st.error("Password must be at least 8 characters.")
-                elif signup_password != signup_password_confirm:
-                    st.error("Passwords do not match.")
-                elif get_user(clean_email) is not None:
-                    st.error("An account with that email already exists. Try logging in instead.")
-                else:
-                    code = generate_otp()
-                    with st.spinner("Sending verification code..."):
-                        sent = send_otp_email(clean_email, clean_username, code)
-                    if sent:
-                        st.session_state.otp_pending = True
-                        st.session_state.otp_code = code
-                        st.session_state.otp_sent_at = time.time()
-                        st.session_state.otp_attempts = 0
-                        st.session_state.pending_username = clean_username
-                        st.session_state.pending_email = clean_email
-                        st.session_state.pending_password = signup_password
-                        st.rerun()
-
-    else:
-        st.title("🔐 Verify Your Email")
-        st.caption(f"We sent a {OTP_LENGTH}-digit code to **{st.session_state.pending_email}**.")
-
-        elapsed = time.time() - st.session_state.otp_sent_at
-        remaining = max(0, OTP_VALID_SECONDS - elapsed)
-
-        if remaining == 0:
-            st.warning("That code has expired. Please request a new one.")
+        # Live queue context for the chosen book
+        current_count = counts.get(chosen_item["book_id"], 0)
+        if current_count == 0:
+            st.caption("🟢 No one else is waiting for this right now.")
         else:
-            mins, secs = divmod(int(remaining), 60)
-            st.caption(f"Code expires in {mins:02d}:{secs:02d}")
+            st.caption(f"🟠 {current_count} student(s) already waiting — you'll be #{current_count + 1} in line.")
 
-        with st.form("otp_form"):
-            code_input = st.text_input("Verification code", placeholder="1234", max_chars=OTP_LENGTH)
-            verify_button = st.form_submit_button("Verify & Create Account")
+        st.markdown("**When do you need it by?**")
+        needed_by = st.date_input(
+            "Needed by",
+            min_value=datetime.date.today(),
+            value=datetime.date.today(),
+            label_visibility="collapsed"
+        )
 
-        if verify_button:
-            if remaining == 0:
-                st.error("Code expired. Please request a new one below.")
-            elif st.session_state.otp_attempts >= OTP_MAX_ATTEMPTS:
-                st.error("Too many incorrect attempts. Please request a new code.")
-            elif code_input.strip() == st.session_state.otp_code:
-                clean_username = st.session_state.pending_username
-                clean_email = st.session_state.pending_email
-                clean_password = st.session_state.pending_password
+        st.markdown("**Signature**")
+        sig_tab1, sig_tab2 = st.tabs(["Draw signature", "Upload image"])
+        signature_data = None
+        signature_type = None
 
-                if get_user(clean_email) is not None:
-                    st.error("An account with that email already exists. Try logging in instead.")
-                    reset_otp_state()
-                    st.session_state.mode = "login"
-                    st.rerun()
-                else:
-                    create_user(clean_email, clean_username, clean_password)
-                    send_welcome_email(clean_email, clean_username)
+        with sig_tab1:
+            st.caption("Draw with your mouse or finger below.")
+            try:
+                from streamlit_drawable_canvas import st_canvas
+                canvas_result = st_canvas(
+                    stroke_width=2,
+                    stroke_color="#22303C",
+                    background_color="#FFFFFF",
+                    height=150,
+                    width=400,
+                    drawing_mode="freedraw",
+                    key="sig_canvas",
+                )
+                if canvas_result.image_data is not None:
+                    import numpy as np
+                    from PIL import Image
+                    import io
+                    arr = canvas_result.image_data
+                    if arr.sum() > 0:
+                        img = Image.fromarray(arr.astype("uint8"), "RGBA")
+                        buf = io.BytesIO()
+                        img.save(buf, format="PNG")
+                        signature_data = base64.b64encode(buf.getvalue()).decode()
+                        signature_type = "drawn"
+            except ImportError:
+                st.info(
+                    "Drawing requires the `streamlit-drawable-canvas` package. "
+                    "Add it to requirements.txt, or use the **Upload image** tab instead."
+                )
 
-                    st.session_state.logged_in = True
-                    st.session_state.username = clean_username
-                    st.session_state.user_email = clean_email
-                    st.query_params["email"] = clean_email
+        with sig_tab2:
+            uploaded_sig = st.file_uploader("Upload a photo of your signature", type=["png", "jpg", "jpeg"])
+            if uploaded_sig is not None:
+                signature_data = base64.b64encode(uploaded_sig.read()).decode()
+                signature_type = "uploaded"
 
-                    reset_otp_state()
-                    st.rerun()
+        submitted = st.form_submit_button("Reserve this book", use_container_width=True)
+
+        if submitted:
+            if signature_data is None:
+                st.error("Please draw or upload your signature before submitting.")
             else:
-                st.session_state.otp_attempts += 1
-                left = OTP_MAX_ATTEMPTS - st.session_state.otp_attempts
-                if left > 0:
-                    st.error(f"Incorrect code. {left} attempt(s) remaining.")
-                else:
-                    st.error("Too many incorrect attempts. Please request a new code.")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            can_resend = elapsed >= RESEND_COOLDOWN_SECONDS
-            if st.button(
-                "Resend Code" if can_resend else f"Resend available in {int(RESEND_COOLDOWN_SECONDS - elapsed)}s",
-                disabled=not can_resend,
-            ):
-                new_code = generate_otp()
-                with st.spinner("Resending verification code..."):
-                    sent = send_otp_email(
-                        st.session_state.pending_email,
-                        st.session_state.pending_username,
-                        new_code,
-                    )
-                if sent:
-                    st.session_state.otp_code = new_code
-                    st.session_state.otp_sent_at = time.time()
-                    st.session_state.otp_attempts = 0
-                    st.rerun()
-        with col2:
-            if st.button("Start Over"):
-                reset_otp_state()
+                db.create_reservation(
+                    book_id=chosen_item["book_id"],
+                    student_name=student_name,
+                    needed_by_date=needed_by.isoformat(),
+                    signature_data=signature_data,
+                    signature_type=signature_type,
+                )
+                st.success(f"Reserved! You're in line for **{chosen_label}**.")
                 st.rerun()
 
-else:
-    my_email = st.session_state.user_email
+    st.markdown('<hr class="thin-rule">', unsafe_allow_html=True)
+    st.markdown("### Current queue status")
+    st.caption("A quick look at what's in demand right now.")
 
-    top_left, top_right = st.columns([4, 1])
-    with top_left:
-        st.title(f"💬 {st.session_state.username}")
-    with top_right:
-        if st.button("Log Out"):
-            st.query_params.clear()
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.session_state.user_email = ""
-            st.session_state.active_contact_email = None
-            reset_otp_state()
+    for subject, item_types in db.SUBJECTS.items():
+        with st.expander(subject, expanded=False):
+            for item_type in item_types:
+                book_id = f"{subject}::{item_type}"
+                count = counts.get(book_id, 0)
+                badge = render_queue_badge_html(count)
+                st.markdown(
+                    f'<div class="book-card">{badge}<div class="item-type">{item_type}</div></div>',
+                    unsafe_allow_html=True
+                )
+
+
+# =========================================================================
+# VIEW: My reservations
+# =========================================================================
+
+elif st.session_state.view == "mine":
+    render_header(
+        "Personal status",
+        "My Reservations",
+        "Check your place in line and when your reservation is for."
+    )
+
+    who = st.selectbox("I am:", db.STUDENTS)
+    my_reservations = db.get_reservations_for_student(who)
+
+    if not my_reservations:
+        st.markdown('<div class="empty-note">No active reservations. Head to "Reserve a book" to join a queue.</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f"**{len(my_reservations)}** active reservation(s):")
+        for res in my_reservations:
+            pos = db.get_queue_position(res["id"])
+            book_label = res["book_id"].replace("::", " — ")
+            d_until = days_until(res["needed_by_date"])
+
+            if d_until is not None and d_until < 0:
+                due_text = f"needed by {res['needed_by_date']} (overdue)"
+            elif d_until == 0:
+                due_text = "needed today"
+            else:
+                due_text = f"needed by {res['needed_by_date']} ({d_until} day{'s' if d_until != 1 else ''} left)"
+
+            pos_class = "first" if pos == 1 else ""
+            st.markdown(f"""
+            <div class="ticket mine">
+                <span class="ticket-pos {pos_class}">#{pos}</span>
+                <div class="ticket-name">{book_label}</div>
+                <div class="ticket-meta">{due_text.upper()}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.caption("Position #1 means you're next to receive the book from Shaikh Zulqarnain.")
+
+
+# =========================================================================
+# VIEW: Admin
+# =========================================================================
+
+elif st.session_state.view == "admin":
+    render_header("Owner access only", "Admin Panel", "Full control over queues, reservations, and fulfillment.")
+
+    if "admin_authed" not in st.session_state:
+        st.session_state.admin_authed = False
+
+    if not st.session_state.admin_authed:
+        st.markdown("Enter your passcode to continue.")
+        code_input = st.text_input("Passcode", type="password", label_visibility="collapsed")
+        if st.button("Unlock"):
+            admin_code = st.secrets.get("ADMIN_PASSCODE", None) if hasattr(st, "secrets") else None
+            if admin_code is None:
+                st.error(
+                    "No admin passcode is configured. Set ADMIN_PASSCODE in your app's Secrets "
+                    "(Streamlit Cloud → Settings → Secrets) before using the admin panel."
+                )
+            elif code_input == admin_code:
+                st.session_state.admin_authed = True
+                db.log_admin_action("login")
+                st.rerun()
+            else:
+                st.error("Incorrect passcode.")
+        st.stop()
+
+    top_bar_l, top_bar_r = st.columns([3, 1])
+    with top_bar_r:
+        if st.button("Lock panel"):
+            st.session_state.admin_authed = False
             st.rerun()
 
-    col_contacts, col_chat = st.columns([1, 2.5], gap="medium")
+    tab_queues, tab_all, tab_catalog = st.tabs(["Queues by book", "All reservations", "Catalog reference"])
 
-    with col_contacts:
-        st.subheader("Contacts")
+    # ---- Queues by book ----
+    with tab_queues:
+        counts = db.reservation_counts_by_book()
+        items = db.all_book_items()
+        books_with_queue = [it for it in items if counts.get(it["book_id"], 0) > 0]
 
-        if st.button("➕ Add Contact", use_container_width=True):
-            st.session_state.show_add_contact = not st.session_state.show_add_contact
-
-        if st.session_state.show_add_contact:
-            with st.form("add_contact_form", clear_on_submit=True):
-                new_contact_email = st.text_input("Contact's email", placeholder="name@example.com")
-                add_submit = st.form_submit_button("Add")
-
-            if add_submit:
-                clean_contact_email = new_contact_email.strip()
-                if not clean_contact_email:
-                    st.error("Please enter an email address.")
-                elif clean_contact_email == my_email:
-                    st.error("You can't add yourself as a contact.")
-                elif get_user(clean_contact_email) is None:
-                    st.error("No account exists with that email.")
-                else:
-                    add_contact(my_email, clean_contact_email)
-                    st.session_state.show_add_contact = False
-                    st.success("Contact added.")
-                    st.rerun()
-
-        contacts = get_contacts(my_email)
-        if not contacts:
-            st.caption("No contacts yet. Add one to start chatting.")
+        if not books_with_queue:
+            st.markdown('<div class="empty-note">No active queues right now.</div>', unsafe_allow_html=True)
         else:
-            for contact in contacts:
-                label = contact["username"]
-                is_active = st.session_state.active_contact_email == contact["email"]
-                if st.button(
-                    ("👉 " if is_active else "") + label,
-                    key=f"contact_{contact['email']}",
-                    use_container_width=True,
-                ):
-                    st.session_state.active_contact_email = contact["email"]
-                    st.rerun()
+            for it in books_with_queue:
+                st.markdown(f"#### {it['label']}")
+                queue = db.get_queue_for_book(it["book_id"])
+                for idx, res in enumerate(queue, start=1):
+                    d_until = days_until(res["needed_by_date"])
+                    due_note = f"needed by {res['needed_by_date']}"
+                    if d_until is not None and d_until < 0:
+                        due_note += " — OVERDUE"
 
-    with col_chat:
-        active_email = st.session_state.active_contact_email
+                    c1, c2, c3, c4 = st.columns([0.5, 2.5, 1.5, 1.5])
+                    with c1:
+                        st.markdown(f"**#{idx}**")
+                    with c2:
+                        st.markdown(f"**{res['student_name']}**")
+                        st.caption(due_note)
+                    with c3:
+                        if res["signature_data"]:
+                            st.image(
+                                base64.b64decode(res["signature_data"]),
+                                width=100,
+                            )
+                    with c4:
+                        b1, b2 = st.columns(2)
+                        with b1:
+                            if st.button("Given ✓", key=f"fulfill_{res['id']}"):
+                                db.mark_fulfilled(res["id"])
+                                db.log_admin_action("fulfilled", f"{res['student_name']} — {it['label']}")
+                                st.rerun()
+                        with b2:
+                            if st.button("Cancel", key=f"cancel_{res['id']}"):
+                                db.cancel_reservation(res["id"])
+                                db.log_admin_action("cancelled", f"{res['student_name']} — {it['label']}")
+                                st.rerun()
+                st.markdown('<hr class="thin-rule">', unsafe_allow_html=True)
 
-        if not active_email:
-            st.info("Select a contact on the left, or add a new one, to start chatting.")
+    # ---- All reservations ----
+    with tab_all:
+        all_res = db.get_all_reservations()
+        if not all_res:
+            st.markdown('<div class="empty-note">No reservations have been made yet.</div>', unsafe_allow_html=True)
         else:
-            active_user = get_user(active_email)
-            active_name = active_user["username"] if active_user else active_email
-            st.subheader(f"Chat with {active_name}")
-
-            chat_box = st.container(height=400)
-            messages = get_conversation(my_email, active_email)
-
-            with chat_box:
-                if not messages:
-                    st.caption("No messages yet. Say hello!")
-                for m in messages:
-                    is_mine = m["sender_email"] == my_email
-                    bubble_color = "#DCF8C6" if is_mine else "#FFFFFF"
-                    sender_label = "You" if is_mine else active_name
-                    timestamp = time.strftime("%H:%M", time.localtime(m["sent_at"]))
-                    st.markdown(
-                        f"""
-                        <div style="display:flex; justify-content:{'flex-end' if is_mine else 'flex-start'}; margin:4px 0;">
-                          <div style="background:{bubble_color}; border-radius:10px; padding:8px 12px;
-                                      max-width:70%; box-shadow:0 1px 2px rgba(0,0,0,0.15);">
-                            <div style="font-size:0.75em; color:#555; margin-bottom:2px;">{escape(sender_label)}</div>
-                            <div style="white-space:pre-wrap; word-wrap:break-word;">{escape(m['body'])}</div>
-                            <div style="font-size:0.7em; color:#888; text-align:right; margin-top:2px;">{timestamp}</div>
-                          </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-            with st.form("send_message_form", clear_on_submit=True):
-                msg_col, btn_col = st.columns([5, 1])
-                with msg_col:
-                    new_message = st.text_input(
-                        "Message",
-                        placeholder="Type a message...",
-                        label_visibility="collapsed",
-                    )
-                with btn_col:
-                    send_submit = st.form_submit_button("Send", use_container_width=True)
-
-            if send_submit and new_message.strip():
-                send_message(my_email, active_email, new_message.strip())
-                st.rerun()
-
-            refresh_col, status_col = st.columns([1, 3])
-            with refresh_col:
-                if st.button("🔄 Refresh"):
+            status_filter = st.multiselect(
+                "Filter by status",
+                ["waiting", "fulfilled", "cancelled"],
+                default=["waiting", "fulfilled", "cancelled"]
+            )
+            filtered = [r for r in all_res if r["status"] in status_filter]
+            for res in filtered:
+                book_label = res["book_id"].replace("::", " — ")
+                status_color = {"waiting": "🟡", "fulfilled": "🟢", "cancelled": "⚪"}[res["status"]]
+                st.markdown(
+                    f"{status_color} **{res['student_name']}** · {book_label} · "
+                    f"needed by {res['needed_by_date']} · *{res['status']}* · "
+                    f"reserved {res['created_at'][:16].replace('T', ' ')}"
+                )
+                if st.button("Delete permanently", key=f"del_{res['id']}"):
+                    db.delete_reservation(res["id"])
+                    db.log_admin_action("deleted", f"{res['student_name']} — {book_label}")
                     st.rerun()
-            with status_col:
-                st.caption("Tap Refresh to check for new messages.")
-                    
+            st.markdown('<hr class="thin-rule">', unsafe_allow_html=True)
+
+    # ---- Catalog reference ----
+    with tab_catalog:
+        st.caption("This is the fixed catalog the form pulls from. To change subjects, item types, or the student list, edit SUBJECTS and STUDENTS in database.py — see the note below.")
+        for subject, item_types in db.SUBJECTS.items():
+            st.markdown(f"**{subject}**")
+            st.markdown(", ".join(item_types))
+        st.markdown('<hr class="thin-rule">', unsafe_allow_html=True)
+        st.markdown("**Students:** " + ", ".join(db.STUDENTS))
+        
