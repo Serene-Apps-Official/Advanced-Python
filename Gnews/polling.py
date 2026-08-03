@@ -669,4 +669,13 @@ html, body, [data-testid="stAppViewContainer"] {
     padding-top: 1.2rem;
     border-top: 1px solid var(--line);
     text-align: center;
-    font-siz
+    font-size: 0.75rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+}
+
+.desk-footer .name {
+    color: var(--brass);
+    font-weight: 600;
+}
+"""
