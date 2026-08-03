@@ -2,6 +2,12 @@ import streamlit as st
 import datetime
 import base64
 import sqlite3
+import smtplib
+import ssl
+import random
+import string
+import secrets as pysecrets
+from email.mime.text import MIMEText
 from contextlib import contextmanager
 
 st.set_page_config(
@@ -12,17 +18,15 @@ st.set_page_config(
 )
 
 # =========================================================================
-# DATABASE LAYER
-# All persistence for the Book Reservation Desk, merged into this single
-# file so the whole app deploys as one app.py. Uses SQLite - no external
-# database needed.
+# CONFIG
 # =========================================================================
 
 DB_PATH = "reservations.db"
 
-# ---- Fixed catalog ---------------------------------------------------------
-# Subjects and which item types each one actually has.
-# Textbooks are intentionally excluded everywhere (students cannot borrow them).
+# The one email address allowed to log in as admin. Selecting "admin" as the
+# name with any other email will be rejected.
+ADMIN_EMAIL = "zohebpass1231@gmail.com"
+
 SUBJECTS = {
     "Hindi":            ["Workbook", "Grammar Notebook", "Digest"],
     "Marathi":          ["Workbook", "Grammar Notebook", "Digest"],
@@ -36,10 +40,10 @@ SUBJECTS = {
 }
 
 STUDENTS = ["Maaz", "Ziyan", "Ismail", "Mutahhir", "Talha", "Shaikh Affan"]
+NAME_OPTIONS = STUDENTS + ["admin"]
 
 
 def all_book_items():
-    """Flat list of (subject, item_type, display_label, book_id)."""
     items = []
     for subject, item_types in SUBJECTS.items():
         for item_type in item_types:
@@ -52,6 +56,10 @@ def all_book_items():
             })
     return items
 
+
+# =========================================================================
+# DATABASE LAYER
+# =========================================================================
 
 @contextmanager
 def get_conn():
@@ -68,6 +76,25 @@ def get_conn():
 def init_db():
     with get_conn() as conn:
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                verified INTEGER NOT NULL DEFAULT 0,
+                device_token TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS login_codes (
+                email TEXT PRIMARY KEY,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS reservations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 book_id TEXT NOT NULL,
@@ -78,13 +105,8 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'waiting',
                 created_at TEXT NOT NULL,
                 fulfilled_at TEXT,
-                expires_at TEXT
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS book_status (
-                book_id TEXT PRIMARY KEY,
-                currently_out INTEGER NOT NULL DEFAULT 0
+                returned INTEGER NOT NULL DEFAULT 0,
+                returned_on TEXT
             )
         """)
         conn.execute("""
@@ -95,10 +117,80 @@ def init_db():
                 timestamp TEXT NOT NULL
             )
         """)
+        # Migration safety: add columns if an older DB file is reused
+        existing_cols = [r["name"] for r in conn.execute("PRAGMA table_info(reservations)").fetchall()]
+        if "returned" not in existing_cols:
+            conn.execute("ALTER TABLE reservations ADD COLUMN returned INTEGER NOT NULL DEFAULT 0")
+        if "returned_on" not in existing_cols:
+            conn.execute("ALTER TABLE reservations ADD COLUMN returned_on TEXT")
 
 
 def now_iso():
     return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+# ---- Accounts / auth --------------------------------------------------------
+
+def get_account_by_email(email):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM accounts WHERE email = ?", (email.strip().lower(),)).fetchone()
+        return dict(row) if row else None
+
+
+def get_account_by_device_token(token):
+    if not token:
+        return None
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM accounts WHERE device_token = ?", (token,)).fetchone()
+        return dict(row) if row else None
+
+
+def create_or_get_account(name, email, is_admin=False):
+    email = email.strip().lower()
+    existing = get_account_by_email(email)
+    if existing:
+        return existing
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO accounts (name, email, is_admin, verified, created_at) VALUES (?, ?, ?, 0, ?)",
+            (name, email, 1 if is_admin else 0, now_iso())
+        )
+    return get_account_by_email(email)
+
+
+def mark_verified_with_token(email, device_token):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE accounts SET verified = 1, device_token = ? WHERE email = ?",
+            (device_token, email.strip().lower())
+        )
+
+
+def set_login_code(email, name, code):
+    expires = (datetime.datetime.now() + datetime.timedelta(minutes=10)).isoformat(timespec="seconds")
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO login_codes (email, code, name, expires_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(email) DO UPDATE SET code=excluded.code, name=excluded.name, expires_at=excluded.expires_at",
+            (email.strip().lower(), code, name, expires)
+        )
+
+
+def check_login_code(email, code):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM login_codes WHERE email = ?", (email.strip().lower(),)).fetchone()
+        if not row:
+            return False
+        if row["code"] != code:
+            return False
+        if datetime.datetime.now() > datetime.datetime.fromisoformat(row["expires_at"]):
+            return False
+        return True
+
+
+def clear_login_code(email):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM login_codes WHERE email = ?", (email.strip().lower(),))
 
 
 # ---- Reservation operations -------------------------------------------------
@@ -117,8 +209,7 @@ def get_queue_for_book(book_id, include_fulfilled=False):
     with get_conn() as conn:
         if include_fulfilled:
             rows = conn.execute(
-                "SELECT * FROM reservations WHERE book_id = ? ORDER BY id ASC",
-                (book_id,)
+                "SELECT * FROM reservations WHERE book_id = ? ORDER BY id ASC", (book_id,)
             ).fetchall()
         else:
             rows = conn.execute(
@@ -128,19 +219,9 @@ def get_queue_for_book(book_id, include_fulfilled=False):
         return [dict(r) for r in rows]
 
 
-def get_all_active_reservations():
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM reservations WHERE status = 'waiting' ORDER BY book_id, id ASC"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-
 def get_all_reservations():
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM reservations ORDER BY created_at DESC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM reservations ORDER BY created_at DESC").fetchall()
         return [dict(r) for r in rows]
 
 
@@ -154,16 +235,12 @@ def get_reservations_for_student(student_name):
 
 
 def get_queue_position(reservation_id):
-    """1-indexed position of this reservation within its book's waiting queue.
-    Uses the row id (insertion order) rather than the timestamp, since two
-    reservations can share the same second-resolution timestamp."""
     with get_conn() as conn:
         row = conn.execute("SELECT book_id, id FROM reservations WHERE id = ?", (reservation_id,)).fetchone()
         if not row:
             return None
         count = conn.execute(
-            """SELECT COUNT(*) as c FROM reservations
-               WHERE book_id = ? AND status = 'waiting' AND id <= ?""",
+            "SELECT COUNT(*) as c FROM reservations WHERE book_id = ? AND status = 'waiting' AND id <= ?",
             (row["book_id"], row["id"])
         ).fetchone()
         return count["c"]
@@ -177,12 +254,25 @@ def mark_fulfilled(reservation_id):
         )
 
 
-def cancel_reservation(reservation_id):
+def mark_returned(reservation_id, returned_on_date):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE reservations SET status = 'cancelled' WHERE id = ?",
+            "UPDATE reservations SET returned = 1, returned_on = ? WHERE id = ?",
+            (returned_on_date, reservation_id)
+        )
+
+
+def unmark_returned(reservation_id):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE reservations SET returned = 0, returned_on = NULL WHERE id = ?",
             (reservation_id,)
         )
+
+
+def cancel_reservation(reservation_id):
+    with get_conn() as conn:
+        conn.execute("UPDATE reservations SET status = 'cancelled' WHERE id = ?", (reservation_id,))
 
 
 def delete_reservation(reservation_id):
@@ -201,378 +291,302 @@ def log_admin_action(action, detail=""):
 def reservation_counts_by_book():
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT book_id, COUNT(*) as waiting_count
-               FROM reservations WHERE status = 'waiting' GROUP BY book_id"""
+            "SELECT book_id, COUNT(*) as waiting_count FROM reservations WHERE status = 'waiting' GROUP BY book_id"
         ).fetchall()
         return {r["book_id"]: r["waiting_count"] for r in rows}
 
+
 init_db()
 
+
 # =========================================================================
-# DESIGN SYSTEM — "Library Hold Desk"
-# Deep library green, parchment, brass ticket accents. Serif catalog
-# headers over clean sans body. Reservations render as numbered hold tickets.
+# EMAIL SENDING
+# Uses Gmail SMTP with an App Password stored in Streamlit Secrets.
+# Required secrets: SENDER_EMAIL, SENDER_APP_PASSWORD
+# =========================================================================
+
+def send_verification_email(to_email, code):
+    sender_email = st.secrets.get("SENDER_EMAIL", None)
+    sender_password = st.secrets.get("SENDER_APP_PASSWORD", None)
+
+    if not sender_email or not sender_password:
+        return False, (
+            "Email sending isn't configured yet. Set SENDER_EMAIL and SENDER_APP_PASSWORD "
+            "in your app's Secrets (Streamlit Cloud → Settings → Secrets)."
+        )
+
+    subject = "Your Book Desk verification code"
+    body = (
+        f"Your verification code is: {code}\n\n"
+        f"This code expires in 10 minutes.\n\n"
+        f"— The Book Desk (Shaikh Zulqarnain's book sharing log)"
+    )
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = sender_email
+    msg["To"] = to_email
+
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls(context=context)
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, to_email, msg.as_string())
+        return True, None
+    except Exception as e:
+        return False, f"Couldn't send the email: {e}"
+
+
+def generate_code():
+    return "".join(random.choices(string.digits, k=6))
+
+
+def generate_device_token():
+    return pysecrets.token_urlsafe(24)
+
+
+# =========================================================================
+# DESIGN SYSTEM — "The Library Ledger"
+# A dark, minimal, professional theme inspired by premium editorial sites:
+# near-black ink base, warm brass/amber glow accent (library-stamp, reading-
+# lamp feel), serif display type over clean sans body, monospace for ticket
+# data. Every native Streamlit control is restyled to disappear into this
+# language — no default Streamlit look should be visible anywhere.
+#
+# Signature element: the "ticket stub" — a perforated hold-slip card with a
+# torn edge and punched notch, echoing a physical library due-date card.
 # =========================================================================
 
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,500&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-    --ink: #22303C;
-    --parchment: #F7F3E9;
-    --parchment-deep: #EFE8D8;
-    --green: #1B4332;
-    --green-deep: #12291F;
-    --sage: #84A98C;
-    --brass: #B8860B;
-    --brass-light: #D4A62A;
-    --red: #B23A2E;
-    --line: rgba(34,48,60,0.14);
+    --ink: #0A0E0C;
+    --ink-1: #0F1512;
+    --ink-2: #151C18;
+    --ink-3: #1E2621;
+    --brass: #C9A227;
+    --brass-bright: #F0C94A;
+    --brass-dim: #8A6D1F;
+    --text: #EDEAE0;
+    --text-dim: #9C9A8E;
+    --text-faint: #6B6A61;
+    --hairline: rgba(201,162,39,0.16);
+    --hairline-bright: rgba(201,162,39,0.34);
+    --danger: #C9573B;
+    --success: #6B9B6E;
+    --radius-s: 6px;
+    --radius-m: 12px;
+    --radius-l: 20px;
+    --ease: cubic-bezier(.22,.61,.36,1);
+    --serif: 'Lora', 'Georgia', serif;
+    --sans: 'Inter', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
 }
 
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; color: var(--ink); }
-.stApp { background: var(--parchment); }
-
-h1, h2, h3 { font-family: 'Lora', serif !important; color: var(--green-deep); letter-spacing: -0.01em; }
-
-/* Header block */
-.desk-header {
-    border-bottom: 2px solid var(--green-deep);
-    padding-bottom: 18px;
-    margin-bottom: 28px;
+/* ---- Nuke Streamlit chrome ------------------------------------------- */
+#MainMenu, header[data-testid="stHeader"], footer, .stDeployButton,
+div[data-testid="stToolbar"], div[data-testid="stDecoration"],
+div[data-testid="stStatusWidget"] {
+    display: none !important;
 }
+.stApp {
+    background:
+        radial-gradient(circle at 15% 0%, rgba(201,162,39,.07), transparent 45%),
+        radial-gradient(circle at 85% 100%, rgba(201,162,39,.05), transparent 50%),
+        var(--ink) !important;
+}
+.stApp, .stApp * {
+    font-family: var(--sans);
+}
+body, .stApp, [data-testid="stAppViewContainer"] {
+    color: var(--text) !important;
+}
+.block-container {
+    max-width: 760px !important;
+    padding-top: 2.5rem !important;
+    padding-bottom: 5rem !important;
+}
+h1, h2, h3, h4 {
+    font-family: var(--serif) !important;
+    color: var(--text) !important;
+    letter-spacing: -0.01em;
+    font-weight: 500 !important;
+}
+
+/* ---- Grain texture overlay -------------------------------------------- */
+.grain-overlay {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    opacity: .025; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---- Header block ------------------------------------------------------ */
+.desk-header { margin-bottom: 36px; position: relative; z-index: 1; }
 .desk-eyebrow {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.14em;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--brass);
-    font-weight: 500;
+    color: var(--brass-bright);
+}
+.desk-eyebrow::before {
+    content: ''; width: 6px; height: 6px; transform: rotate(45deg);
+    background: var(--brass); display: inline-block;
+    box-shadow: 0 0 8px rgba(201,162,39,.7);
 }
 .desk-title {
-    font-family: 'Lora', serif;
-    font-weight: 700;
-    font-size: 2.1rem;
-    color: var(--green-deep);
-    margin: 4px 0 2px 0;
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 2.4rem;
+    color: var(--text);
+    margin: 10px 0 6px 0;
+    letter-spacing: -0.015em;
 }
 .desk-sub {
-    font-size: 0.92rem;
-    color: rgba(34,48,60,0.65);
+    font-size: 0.96rem;
+    color: var(--text-dim);
+    font-weight: 300;
+    max-width: 46ch;
+}
+.desk-header-rule {
+    margin-top: 24px;
+    height: 1px;
+    background: linear-gradient(to right, var(--hairline-bright), transparent 70%);
 }
 
-/* Ticket card — the signature element */
-.ticket {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-left: 5px solid var(--green);
-    border-radius: 6px;
-    padding: 16px 18px;
-    margin-bottom: 12px;
-    position: relative;
-    box-shadow: 0 1px 3px rgba(34,48,60,0.06);
+/* ---- Session badge ------------------------------------------------------ */
+.session-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0 18px 0;
+    position: relative; z-index: 1;
 }
-.ticket.mine { border-left-color: var(--brass); background: #FFFDF6; }
+.session-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.04em;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--hairline);
+    background: var(--ink-2);
+    color: var(--text-dim);
+}
+.session-badge .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--brass); box-shadow: 0 0 6px rgba(201,162,39,.8);
+}
+.session-badge.admin { border-color: var(--hairline-bright); color: var(--brass-bright); }
+
+/* ---- Ticket stub — the signature element ------------------------------- */
+.ticket {
+    position: relative;
+    background: var(--ink-2);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-m);
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    overflow: visible;
+    transition: border-color .3s var(--ease), transform .3s var(--ease), box-shadow .3s var(--ease);
+}
+.ticket:hover {
+    border-color: var(--hairline-bright);
+    box-shadow: 0 8px 28px -14px rgba(201,162,39,.35);
+}
+.ticket.mine { border-color: var(--hairline-bright); background: linear-gradient(150deg, var(--ink-2), var(--ink-3)); }
+/* Perforated notch on the left edge, like a torn ticket stub */
+.ticket::before {
+    content: '';
+    position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--ink);
+    border: 1px solid var(--hairline);
+}
 .ticket-pos {
-    font-family: 'Lora', serif;
-    font-weight: 700;
-    font-size: 1.6rem;
-    color: var(--green-deep);
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 1.7rem;
+    color: var(--text-dim);
     float: right;
     line-height: 1;
     opacity: 0.85;
 }
-.ticket-pos.first { color: var(--brass); }
-.ticket-name { font-weight: 600; font-size: 1.02rem; }
+.ticket-pos.first { color: var(--brass-bright); text-shadow: 0 0 14px rgba(240,201,74,.4); }
+.ticket-name {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 1.08rem;
+    color: var(--text);
+}
 .ticket-meta {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.76rem;
-    color: rgba(34,48,60,0.6);
-    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    color: var(--text-faint);
+    margin-top: 6px;
 }
 
-/* Book card in catalog */
+/* ---- Book / catalog cards ----------------------------------------------- */
 .book-card {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 10px;
+    background: var(--ink-2);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-s);
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    transition: border-color .25s var(--ease);
 }
-.book-card .subject { font-family: 'Lora', serif; font-weight: 600; font-size: 1.05rem; color: var(--green-deep); }
-.book-card .item-type { font-size: 0.85rem; color: rgba(34,48,60,0.6); }
+.book-card:hover { border-color: var(--hairline-bright); }
+.book-card .item-type { font-size: 0.88rem; color: var(--text-dim); }
 .queue-badge {
     display: inline-block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
+    font-family: var(--mono);
+    font-size: 0.68rem;
     font-weight: 500;
-    padding: 3px 9px;
+    padding: 3px 10px;
     border-radius: 20px;
-    background: var(--parchment-deep);
-    color: var(--green-deep);
+    background: var(--ink-3);
+    color: var(--text-dim);
     float: right;
+    border: 1px solid var(--hairline);
 }
-.queue-badge.empty { background: rgba(132,169,140,0.18); color: var(--sage); }
-.queue-badge.busy { background: rgba(178,58,46,0.1); color: var(--red); }
+.queue-badge.empty { background: rgba(107,155,110,0.1); color: var(--success); border-color: rgba(107,155,110,0.25); }
+.queue-badge.busy { background: rgba(201,87,59,0.1); color: var(--danger); border-color: rgba(201,87,59,0.25); }
 
-/* Buttons */
-.stButton>button {
-    background: var(--green) !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 6px !important;
-    font-weight: 600 !important;
-    padding: 0.55rem 1.4rem !important;
-    transition: background 0.15s ease;
-}
-.stButton>button:hover { background: var(--green-deep) !important; }
+/* ---- Divider ------------------------------------------------------------ */
+.thin-rule { border: none; border-top: 1px solid var(--hairline); margin: 30px 0; }
 
-/* Divider */
-.thin-rule { border: none; border-top: 1px solid var(--line); margin: 22px 0; }
-
-/* Empty state */
 .empty-note {
     font-style: italic;
-    color: rgba(34,48,60,0.5);
+    color: var(--text-faint);
     font-size: 0.9rem;
-    padding: 10px 0;
+    padding: 14px 0;
 }
-</style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
 
+/* ---- Section labels ------------------------------------------------------ */
+.section-label {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 10px;
+    display: block;
+}
 
-# =========================================================================
-# Helpers
-# =========================================================================
+/* =========================================================================
+   STREAMLIT WIDGET OVERRIDES
+   ========================================================================= */
 
-def render_header(eyebrow, title, sub):
-    st.markdown(f"""
-    <div class="desk-header">
-        <div class="desk-eyebrow">{eyebrow}</div>
-        <div class="desk-title">{title}</div>
-        <div class="desk-sub">{sub}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def days_until(date_str):
-    try:
-        target = datetime.date.fromisoformat(date_str)
-        return (target - datetime.date.today()).days
-    except Exception:
-        return None
-
-
-def render_queue_badge_html(count):
-    if count == 0:
-        return '<span class="queue-badge empty">available</span>'
-    elif count >= 2:
-        return f'<span class="queue-badge busy">{count} waiting</span>'
-    else:
-        return f'<span class="queue-badge">{count} waiting</span>'
-
-
-# =========================================================================
-# Navigation
-# =========================================================================
-
-if "view" not in st.session_state:
-    st.session_state.view = "reserve"
-
-top_l, top_r = st.columns([3, 1])
-with top_r:
-    nav_choice = st.selectbox(
-        "Go to",
-        ["Reserve a book", "My reservations", "Admin"],
-        label_visibility="collapsed",
-        index=["Reserve a book", "My reservations", "Admin"].index(
-            {"reserve": "Reserve a book", "mine": "My reservations", "admin": "Admin"}[st.session_state.view]
-        ),
-    )
-    st.session_state.view = {"Reserve a book": "reserve", "My reservations": "mine", "Admin": "admin"}[nav_choice]
-
-
-# =========================================================================
-# VIEW: Reserve a book
-# =========================================================================
-
-if st.session_state.view == "reserve":
-    render_header(
-        "Shaikh Zulqarnain · 10th A",
-        "The Book Desk",
-        "Reserve a notebook or digest ahead of time — first to reserve gets it first."
-    )
-
-    counts = reservation_counts_by_book()
-    items = all_book_items()
-
-    with st.form("reservation_form", clear_on_submit=False):
-        st.markdown("**Who are you?**")
-        student_name = st.selectbox("Student name", STUDENTS, label_visibility="collapsed")
-
-        st.markdown("**Which book do you need?**")
-        item_labels = [it["label"] for it in items]
-        chosen_label = st.selectbox("Book needed", item_labels, label_visibility="collapsed")
-        chosen_item = next(it for it in items if it["label"] == chosen_label)
-
-        # Live queue context for the chosen book
-        current_count = counts.get(chosen_item["book_id"], 0)
-        if current_count == 0:
-            st.caption("🟢 No one else is waiting for this right now.")
-        else:
-            st.caption(f"🟠 {current_count} student(s) already waiting — you'll be #{current_count + 1} in line.")
-
-        st.markdown("**When do you need it by?**")
-        needed_by = st.date_input(
-            "Needed by",
-            min_value=datetime.date.today(),
-            value=datetime.date.today(),
-            label_visibility="collapsed"
-        )
-
-        st.markdown("**Signature**")
-        sig_tab1, sig_tab2 = st.tabs(["Draw signature", "Upload image"])
-        signature_data = None
-        signature_type = None
-
-        with sig_tab1:
-            st.caption("Draw with your mouse or finger below.")
-            try:
-                from streamlit_drawable_canvas import st_canvas
-                canvas_result = st_canvas(
-                    stroke_width=2,
-                    stroke_color="#22303C",
-                    background_color="#FFFFFF",
-                    height=150,
-                    width=400,
-                    drawing_mode="freedraw",
-                    key="sig_canvas",
-                )
-                if canvas_result.image_data is not None:
-                    import numpy as np
-                    from PIL import Image
-                    import io
-                    arr = canvas_result.image_data
-                    if arr.sum() > 0:
-                        img = Image.fromarray(arr.astype("uint8"), "RGBA")
-                        buf = io.BytesIO()
-                        img.save(buf, format="PNG")
-                        signature_data = base64.b64encode(buf.getvalue()).decode()
-                        signature_type = "drawn"
-            except ImportError:
-                st.info(
-                    "Drawing requires the `streamlit-drawable-canvas` package. "
-                    "Add it to requirements.txt, or use the **Upload image** tab instead."
-                )
-
-        with sig_tab2:
-            uploaded_sig = st.file_uploader("Upload a photo of your signature", type=["png", "jpg", "jpeg"])
-            if uploaded_sig is not None:
-                signature_data = base64.b64encode(uploaded_sig.read()).decode()
-                signature_type = "uploaded"
-
-        submitted = st.form_submit_button("Reserve this book", use_container_width=True)
-
-        if submitted:
-            if signature_data is None:
-                st.error("Please draw or upload your signature before submitting.")
-            else:
-                create_reservation(
-                    book_id=chosen_item["book_id"],
-                    student_name=student_name,
-                    needed_by_date=needed_by.isoformat(),
-                    signature_data=signature_data,
-                    signature_type=signature_type,
-                )
-                st.success(f"Reserved! You're in line for **{chosen_label}**.")
-                st.rerun()
-
-    st.markdown('<hr class="thin-rule">', unsafe_allow_html=True)
-    st.markdown("### Current queue status")
-    st.caption("A quick look at what's in demand right now.")
-
-    for subject, item_types in SUBJECTS.items():
-        with st.expander(subject, expanded=False):
-            for item_type in item_types:
-                book_id = f"{subject}::{item_type}"
-                count = counts.get(book_id, 0)
-                badge = render_queue_badge_html(count)
-                st.markdown(
-                    f'<div class="book-card">{badge}<div class="item-type">{item_type}</div></div>',
-                    unsafe_allow_html=True
-                )
-
-
-# =========================================================================
-# VIEW: My reservations
-# =========================================================================
-
-elif st.session_state.view == "mine":
-    render_header(
-        "Personal status",
-        "My Reservations",
-        "Check your place in line and when your reservation is for."
-    )
-
-    who = st.selectbox("I am:", STUDENTS)
-    my_reservations = get_reservations_for_student(who)
-
-    if not my_reservations:
-        st.markdown('<div class="empty-note">No active reservations. Head to "Reserve a book" to join a queue.</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f"**{len(my_reservations)}** active reservation(s):")
-        for res in my_reservations:
-            pos = get_queue_position(res["id"])
-            book_label = res["book_id"].replace("::", " — ")
-            d_until = days_until(res["needed_by_date"])
-
-            if d_until is not None and d_until < 0:
-                due_text = f"needed by {res['needed_by_date']} (overdue)"
-            elif d_until == 0:
-                due_text = "needed today"
-            else:
-                due_text = f"needed by {res['needed_by_date']} ({d_until} day{'s' if d_until != 1 else ''} left)"
-
-            pos_class = "first" if pos == 1 else ""
-            st.markdown(f"""
-            <div class="ticket mine">
-                <span class="ticket-pos {pos_class}">#{pos}</span>
-                <div class="ticket-name">{book_label}</div>
-                <div class="ticket-meta">{due_text.upper()}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.caption("Position #1 means you're next to receive the book from Shaikh Zulqarnain.")
-
-
-# =========================================================================
-# VIEW: Admin
-# =========================================================================
-
-elif st.session_state.view == "admin":
-    render_header("Owner access only", "Admin Panel", "Full control over queues, reservations, and fulfillment.")
-
-    if "admin_authed" not in st.session_state:
-        st.session_state.admin_authed = False
-
-    if not st.session_state.admin_authed:
-        st.markdown("Enter your passcode to continue.")
-        code_input = st.text_input("Passcode", type="password", label_visibility="collapsed")
-        if st.button("Unlock"):
-            admin_code = st.secrets.get("ADMIN_PASSCODE", None) if hasattr(st, "secrets") else None
-            if admin_code is None:
-                st.error(
-                    "No admin passcode is configured. Set ADMIN_PASSCODE in your app's Secrets "
-                    "(Streamlit Cloud → Settings → Secrets) before using the admin panel."
-                )
-            elif code_input == admin_code:
-                st.session_state.admin_authed = True
-                log_admin_action("login")
-                st.rerun()
-            else:
-                st.error("Incorrect passcode.")
-        st.stop()
-
-    top_bar
+/* Buttons */
+.stButton>button, .stFormSubmitButton>button {
+    background: var(--brass) !important;
+    color: var(--ink) !important;
+    border: none !important;
+    border-radius: 999px !important;
+    font-weight: 600 !important;
+    font-family: var(--sans) !important;
+    font-size: 0.88rem !important;
+    padding: 0.6rem 1.6rem !important;
+    transition: transform .3s var(--ea
