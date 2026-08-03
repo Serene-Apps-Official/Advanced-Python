@@ -83,6 +83,7 @@ def init_db():
                 is_admin INTEGER NOT NULL DEFAULT 0,
                 verified INTEGER NOT NULL DEFAULT 0,
                 device_token TEXT,
+                suspended INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             )
         """)
@@ -123,6 +124,9 @@ def init_db():
             conn.execute("ALTER TABLE reservations ADD COLUMN returned INTEGER NOT NULL DEFAULT 0")
         if "returned_on" not in existing_cols:
             conn.execute("ALTER TABLE reservations ADD COLUMN returned_on TEXT")
+        existing_acct_cols = [r["name"] for r in conn.execute("PRAGMA table_info(accounts)").fetchall()]
+        if "suspended" not in existing_acct_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0")
 
 
 def now_iso():
@@ -296,6 +300,30 @@ def reservation_counts_by_book():
         return {r["book_id"]: r["waiting_count"] for r in rows}
 
 
+def student_already_in_queue(book_id, student_name):
+    """True if this student already has a 'waiting' reservation for this book."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM reservations WHERE book_id = ? AND student_name = ? AND status = 'waiting' LIMIT 1",
+            (book_id, student_name)
+        ).fetchone()
+        return row is not None
+
+
+def set_suspended(email, suspended):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE accounts SET suspended = ? WHERE email = ?",
+            (1 if suspended else 0, email.strip().lower())
+        )
+
+
+def get_all_accounts():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM accounts ORDER BY created_at ASC").fetchall()
+        return [dict(r) for r in rows]
+
+
 init_db()
 
 
@@ -348,193 +376,297 @@ def generate_device_token():
 
 # =========================================================================
 # DESIGN SYSTEM — "The Library Ledger"
-# Dark, minimal, brass-accented theme. The CSS lives in a separate plain
-# text file (style.css) rather than a giant string inside this file, on
-# purpose: a plain CSS file can be partially truncated by a bad copy/paste
-# and the app will just look a bit plain — it can never cause a Python
-# SyntaxError and crash the whole app the way a broken triple-quoted
-# string can. Keep style.css in the same folder as app.py.
+# Dark, minimal, brass-accented theme. Kept as a single plain (non-f) triple
+# quoted string with no Python interpolation, so CSS braces/quotes can't be
+# misread as Python syntax. Wrapped in try/except so a rendering issue here
+# can never take down the rest of the app — worst case it just runs unstyled.
 # =========================================================================
 
-import os
+BOOK_DESK_CSS = """
+/* =========================================================================
+   THE BOOK DESK — "The Library Ledger"
+   Dark, minimal, brass-accented theme for Streamlit.
+   ========================================================================= */
 
-def load_css():
-    css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "style.css")
-    try:
-        with open(css_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception:
-        return ""  # if the file is missing/broken, app still runs — just unstyled
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
 
-st.markdown(f"<style>{load_css()}</style>", unsafe_allow_html=True)
+:root {
+    --ink: #eae4d6;
+    --ink-dim: #a89f8c;
+    --ink-faint: #6f6857;
+    --paper: #14120f;
+    --paper-raised: #1c1912;
+    --paper-card: #201c15;
+    --brass: #c9a15a;
+    --brass-bright: #e3bd76;
+    --brass-dim: #7a6236;
+    --line: #35301f;
+    --danger: #c86a5a;
+    --good: #7fa876;
+}
 
-# =========================================================================
-# Helpers
-# =========================================================================
+html, body, [data-testid="stAppViewContainer"] {
+    background: radial-gradient(ellipse at top, #1a170f 0%, var(--paper) 55%) !important;
+    color: var(--ink) !important;
+    font-family: 'Inter', -apple-system, sans-serif !important;
+}
 
-def render_header(eyebrow, title, sub):
-    st.markdown(f"""
-    <div class="desk-header">
-        <div class="desk-eyebrow">{eyebrow}</div>
-        <div class="desk-title">{title}</div>
-        <div class="desk-sub">{sub}</div>
-        <div class="desk-header-rule"></div>
-    </div>
-    """, unsafe_allow_html=True)
+[data-testid="stHeader"] { background: transparent !important; }
+#MainMenu, footer { visibility: hidden; }
 
+.block-container {
+    max-width: 780px !important;
+    padding-top: 2.5rem !important;
+    padding-bottom: 4rem !important;
+}
 
-def days_until(date_str):
-    try:
-        target = datetime.date.fromisoformat(date_str)
-        return (target - datetime.date.today()).days
-    except Exception:
-        return None
+/* ---- Header ---- */
 
+.desk-header { margin-bottom: 1.75rem; }
 
-def render_queue_badge_html(count):
-    if count == 0:
-        return '<span class="queue-badge empty">available</span>'
-    elif count >= 2:
-        return f'<span class="queue-badge busy">{count} waiting</span>'
-    else:
-        return f'<span class="queue-badge">{count} waiting</span>'
+.desk-eyebrow {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
 
+.desk-title {
+    font-family: 'Fraunces', serif;
+    font-size: 2.4rem;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.1;
+    margin-bottom: 0.4rem;
+}
 
-def render_footer():
-    st.markdown("""
-    <div class="desk-footer">
-        Built for Shaikh Zulqarnain &nbsp;·&nbsp; developed by <span class="name">Serene</span>
-    </div>
-    """, unsafe_allow_html=True)
+.desk-sub {
+    font-size: 0.95rem;
+    color: var(--ink-dim);
+    margin-bottom: 1rem;
+}
 
+.desk-header-rule {
+    height: 1px;
+    background: linear-gradient(90deg, var(--brass-dim), transparent 70%);
+    margin-top: 0.5rem;
+}
 
-# =========================================================================
-# SESSION / LOGIN
-# Device stays logged in via a token stored in the URL query params.
-# =========================================================================
+/* ---- Section labels ---- */
 
-if "account" not in st.session_state:
-    st.session_state.account = None
-if "pending_login" not in st.session_state:
-    st.session_state.pending_login = None
+.section-label {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 600;
+    margin: 1.1rem 0 0.4rem 0;
+}
 
-if st.session_state.account is None:
-    token_from_url = st.query_params.get("t", None)
-    if token_from_url:
-        acct = get_account_by_device_token(token_from_url)
-        if acct and acct["verified"]:
-            st.session_state.account = acct
+/* ---- Inputs ---- */
 
+[data-testid="stTextInput"] input,
+[data-testid="stDateInput"] input,
+[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+    background: var(--paper-raised) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 8px !important;
+    color: var(--ink) !important;
+}
 
-def do_logout():
-    st.session_state.account = None
-    st.session_state.pending_login = None
-    st.query_params.clear()
+[data-testid="stTextInput"] input:focus,
+[data-testid="stDateInput"] input:focus {
+    border-color: var(--brass) !important;
+    box-shadow: 0 0 0 1px var(--brass) !important;
+}
 
+[data-testid="stSelectbox"] label,
+[data-testid="stTextInput"] label,
+[data-testid="stDateInput"] label,
+[data-testid="stRadio"] label {
+    color: var(--ink-dim) !important;
+}
 
-# =========================================================================
-# LOGIN SCREEN
-# =========================================================================
+[data-baseweb="select"] svg { fill: var(--ink-dim) !important; }
 
-if st.session_state.account is None:
-    render_header("Shaikh Zulqarnain · 10th A", "The Book Desk", "Log in to reserve books or manage the desk.")
+/* ---- Buttons ---- */
 
-    if st.session_state.pending_login is None:
-        st.markdown('<span class="section-label">Select your name</span>', unsafe_allow_html=True)
-        chosen_name = st.selectbox("Name", NAME_OPTIONS, label_visibility="collapsed")
+.stButton button, .stFormSubmitButton button, .stDownloadButton button {
+    background: var(--paper-raised) !important;
+    color: var(--brass-bright) !important;
+    border: 1px solid var(--brass-dim) !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em;
+    transition: all 0.15s ease !important;
+}
 
-        st.markdown('<span class="section-label">Your email address</span>', unsafe_allow_html=True)
-        email_input = st.text_input("Email", label_visibility="collapsed", placeholder="you@example.com")
+.stButton button:hover, .stFormSubmitButton button:hover, .stDownloadButton button:hover {
+    background: var(--brass) !important;
+    color: #14120f !important;
+    border-color: var(--brass) !important;
+}
 
-        if st.button("Continue", use_container_width=True):
-            email_clean = email_input.strip().lower()
-            if not email_clean or "@" not in email_clean:
-                st.error("Please enter a valid email address.")
-            elif chosen_name == "admin":
-                if email_clean != ADMIN_EMAIL.lower():
-                    st.error("This email isn't authorized for the admin account.")
-                else:
-                    st.session_state.pending_login = {"name": "admin", "email": email_clean, "mode": "admin_password"}
-                    st.rerun()
-            else:
-                existing = get_account_by_email(email_clean)
-                if existing and existing["name"] != chosen_name:
-                    st.error("This email is already registered under a different name.")
-                else:
-                    code = generate_code()
-                    ok, err = send_verification_email(email_clean, code)
-                    if not ok:
-                        st.error(err)
-                    else:
-                        set_login_code(email_clean, chosen_name, code)
-                        st.session_state.pending_login = {"name": chosen_name, "email": email_clean, "mode": "email_code"}
-                        st.success(f"Code sent to {email_clean}. Check your inbox.")
-                        st.rerun()
+.stButton button[kind="primary"] {
+    background: var(--brass) !important;
+    color: #14120f !important;
+}
 
-    elif st.session_state.pending_login["mode"] == "admin_password":
-        st.markdown('<span class="section-label">Admin login — enter the admin password</span>', unsafe_allow_html=True)
-        pw = st.text_input("Password", type="password", label_visibility="collapsed")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Unlock admin", use_container_width=True):
-                admin_pw = st.secrets.get("ADMIN_PASSWORD", None)
-                if not admin_pw:
-                    st.error(
-                        "No admin password is configured. Set ADMIN_PASSWORD in your app's Secrets "
-                        "(Streamlit Cloud → Settings → Secrets)."
-                    )
-                elif pw == admin_pw:
-                    acct = create_or_get_account("admin", ADMIN_EMAIL, is_admin=True)
-                    token = generate_device_token()
-                    mark_verified_with_token(ADMIN_EMAIL, token)
-                    st.session_state.account = get_account_by_email(ADMIN_EMAIL)
-                    st.session_state.pending_login = None
-                    st.query_params["t"] = token
-                    log_admin_action("login")
-                    st.rerun()
-                else:
-                    st.error("Incorrect password.")
-        with c2:
-            if st.button("Back", use_container_width=True, type="secondary"):
-                st.session_state.pending_login = None
-                st.rerun()
+/* ---- Book rows ---- */
 
-    elif st.session_state.pending_login["mode"] == "email_code":
-        pending = st.session_state.pending_login
-        st.markdown(
-            f'<span class="section-label">Enter the 6-digit code sent to {pending["email"]}</span>',
-            unsafe_allow_html=True
-        )
-        code_input = st.text_input("Code", label_visibility="collapsed", placeholder="123456", max_chars=6)
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Verify", use_container_width=True):
-                if check_login_code(pending["email"], code_input.strip()):
-                    create_or_get_account(pending["name"], pending["email"])
-                    token = generate_device_token()
-                    mark_verified_with_token(pending["email"], token)
-                    clear_login_code(pending["email"])
-                    st.session_state.account = get_account_by_email(pending["email"])
-                    st.session_state.pending_login = None
-                    st.query_params["t"] = token
-                    st.rerun()
-                else:
-                    st.error("Incorrect or expired code.")
-        with c2:
-            if st.button("Resend code", use_container_width=True, type="secondary"):
-                code = generate_code()
-                ok, err = send_verification_email(pending["email"], code)
-                if ok:
-                    set_login_code(pending["email"], pending["name"], code)
-                    st.success("New code sent.")
-                else:
-                    st.error(err)
-        if st.button("Use a different name or email", type="secondary"):
-            st.session_state.pending_login = None
-            st.rerun()
+.book-row {
+    background: var(--paper-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    margin-top: 0.6rem;
+}
 
-    render_footer()
-    st.stop()
+.book-row-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
 
+.book-row-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--ink);
+}
 
-# ========================================
+.row-spacer { height: 0.6rem; }
+
+/* ---- Queue badges ---- */
+
+.queue-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(201, 161, 90, 0.12);
+    color: var(--brass);
+    border: 1px solid var(--brass-dim);
+}
+
+.queue-badge.empty {
+    background: rgba(127, 168, 118, 0.12);
+    color: var(--good);
+    border-color: rgba(127, 168, 118, 0.4);
+}
+
+.queue-badge.busy {
+    background: rgba(200, 106, 90, 0.12);
+    color: var(--danger);
+    border-color: rgba(200, 106, 90, 0.4);
+}
+
+/* ---- Reservation / result cards ---- */
+
+.res-card {
+    background: var(--paper-card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--brass);
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    margin-top: 0.7rem;
+    margin-bottom: 0.3rem;
+}
+
+.res-card-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 0.15rem;
+}
+
+.res-card-meta {
+    font-size: 0.8rem;
+    color: var(--ink-dim);
+}
+
+.empty-state {
+    color: var(--ink-faint);
+    font-style: italic;
+    padding: 1.5rem 0;
+    text-align: center;
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    margin-top: 0.5rem;
+}
+
+/* ---- Log rows ---- */
+
+.log-row {
+    font-size: 0.78rem;
+    color: var(--ink-dim);
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--line);
+}
+
+/* ---- Sidebar ---- */
+
+[data-testid="stSidebar"] {
+    background: var(--paper-raised) !important;
+    border-right: 1px solid var(--line) !important;
+}
+
+.side-name {
+    font-family: 'Fraunces', serif;
+    font-size: 1.15rem;
+    color: var(--brass-bright);
+    font-weight: 600;
+    margin-top: 0.5rem;
+}
+
+.side-email {
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+    margin-bottom: 0.5rem;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    color: var(--ink) !important;
+    font-size: 0.92rem;
+}
+
+/* ---- Tabs ---- */
+
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    gap: 0.3rem;
+    border-bottom: 1px solid var(--line);
+}
+
+[data-testid="stTabs"] button[role="tab"] {
+    color: var(--ink-faint) !important;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+[data-testid="stTabs"] button[aria-selected="true"] {
+    color: var(--brass-bright) !important;
+    border-bottom-color: var(--brass) !important;
+}
+
+/* ---- Alerts ---- */
+
+[data-testid="stAlert"] {
+    border-radius: 8px !important;
+    background: var(--paper-card) !important;
+    border: 1px solid var(--line) !important;
+}
+
+/* ---- Footer ---- */
+
+.desk-footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    text-align: center;
+    font-siz
