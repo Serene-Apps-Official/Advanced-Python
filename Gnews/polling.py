@@ -375,307 +375,356 @@ def generate_device_token():
 
 
 # =========================================================================
-# DESIGN SYSTEM — "The Library Ledger"
-# Dark, minimal, brass-accented theme. Kept as a single plain (non-f) triple
-# quoted string with no Python interpolation, so CSS braces/quotes can't be
-# misread as Python syntax. Wrapped in try/except so a rendering issue here
-# can never take down the rest of the app — worst case it just runs unstyled.
+# Helpers — pure Streamlit, no custom HTML/CSS involved anywhere.
 # =========================================================================
 
-BOOK_DESK_CSS = """
-/* =========================================================================
-   THE BOOK DESK — "The Library Ledger"
-   Dark, minimal, brass-accented theme for Streamlit.
-   ========================================================================= */
+def render_header(eyebrow, title, sub):
+    st.caption(eyebrow.upper())
+    st.title(title)
+    st.caption(sub)
+    st.divider()
 
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
 
-:root {
-    --ink: #eae4d6;
-    --ink-dim: #a89f8c;
-    --ink-faint: #6f6857;
-    --paper: #14120f;
-    --paper-raised: #1c1912;
-    --paper-card: #201c15;
-    --brass: #c9a15a;
-    --brass-bright: #e3bd76;
-    --brass-dim: #7a6236;
-    --line: #35301f;
-    --danger: #c86a5a;
-    --good: #7fa876;
-}
+def days_until(date_str):
+    try:
+        target = datetime.date.fromisoformat(date_str)
+        return (target - datetime.date.today()).days
+    except Exception:
+        return None
 
-html, body, [data-testid="stAppViewContainer"] {
-    background: radial-gradient(ellipse at top, #1a170f 0%, var(--paper) 55%) !important;
-    color: var(--ink) !important;
-    font-family: 'Inter', -apple-system, sans-serif !important;
-}
 
-[data-testid="stHeader"] { background: transparent !important; }
-#MainMenu, footer { visibility: hidden; }
+def render_queue_badge(count):
+    """Shows a small colored status line for how many students are waiting."""
+    if count == 0:
+        st.success("Available — no one waiting", icon="✅")
+    elif count == 1:
+        st.info(f"{count} student waiting", icon="⏳")
+    else:
+        st.warning(f"{count} students waiting", icon="⏳")
 
-.block-container {
-    max-width: 780px !important;
-    padding-top: 2.5rem !important;
-    padding-bottom: 4rem !important;
-}
 
-/* ---- Header ---- */
+def render_footer():
+    st.divider()
+    st.caption("Built for Shaikh Zulqarnain · developed by Serene")
 
-.desk-header { margin-bottom: 1.75rem; }
 
-.desk-eyebrow {
-    font-family: 'Inter', sans-serif;
-    font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--brass);
-    font-weight: 600;
-    margin-bottom: 0.4rem;
-}
+# =========================================================================
+# SESSION / LOGIN
+# Device stays logged in via a token stored in the URL query params.
+# =========================================================================
 
-.desk-title {
-    font-family: 'Fraunces', serif;
-    font-size: 2.4rem;
-    font-weight: 600;
-    color: var(--ink);
-    line-height: 1.1;
-    margin-bottom: 0.4rem;
-}
+if "account" not in st.session_state:
+    st.session_state.account = None
+if "pending_login" not in st.session_state:
+    st.session_state.pending_login = None
 
-.desk-sub {
-    font-size: 0.95rem;
-    color: var(--ink-dim);
-    margin-bottom: 1rem;
-}
+if st.session_state.account is None:
+    token_from_url = st.query_params.get("t", None)
+    if token_from_url:
+        acct = get_account_by_device_token(token_from_url)
+        if acct and acct["verified"] and not acct["suspended"]:
+            st.session_state.account = acct
 
-.desk-header-rule {
-    height: 1px;
-    background: linear-gradient(90deg, var(--brass-dim), transparent 70%);
-    margin-top: 0.5rem;
-}
 
-/* ---- Section labels ---- */
+def do_logout():
+    st.session_state.account = None
+    st.session_state.pending_login = None
+    st.query_params.clear()
 
-.section-label {
-    display: block;
-    font-size: 0.72rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--brass);
-    font-weight: 600;
-    margin: 1.1rem 0 0.4rem 0;
-}
 
-/* ---- Inputs ---- */
+# =========================================================================
+# LOGIN SCREEN
+# =========================================================================
 
-[data-testid="stTextInput"] input,
-[data-testid="stDateInput"] input,
-[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
-    background: var(--paper-raised) !important;
-    border: 1px solid var(--line) !important;
-    border-radius: 8px !important;
-    color: var(--ink) !important;
-}
+if st.session_state.account is None:
+    render_header("Shaikh Zulqarnain · 10th A", "The Book Desk", "Log in to reserve books or manage the desk.")
 
-[data-testid="stTextInput"] input:focus,
-[data-testid="stDateInput"] input:focus {
-    border-color: var(--brass) !important;
-    box-shadow: 0 0 0 1px var(--brass) !important;
-}
+    if st.session_state.pending_login is None:
+        chosen_name = st.selectbox("Select your name", NAME_OPTIONS)
+        email_input = st.text_input("Your email address", placeholder="you@example.com")
 
-[data-testid="stSelectbox"] label,
-[data-testid="stTextInput"] label,
-[data-testid="stDateInput"] label,
-[data-testid="stRadio"] label {
-    color: var(--ink-dim) !important;
-}
+        if st.button("Continue", use_container_width=True):
+            email_clean = email_input.strip().lower()
+            if not email_clean or "@" not in email_clean:
+                st.error("Please enter a valid email address.")
+            elif chosen_name == "admin":
+                if email_clean != ADMIN_EMAIL.lower():
+                    st.error("This email isn't authorized for the admin account.")
+                else:
+                    st.session_state.pending_login = {"name": "admin", "email": email_clean, "mode": "admin_password"}
+                    st.rerun()
+            else:
+                existing = get_account_by_email(email_clean)
+                if existing and existing["name"] != chosen_name:
+                    st.error("This email is already registered under a different name.")
+                else:
+                    code = generate_code()
+                    ok, err = send_verification_email(email_clean, code)
+                    if not ok:
+                        st.error(err)
+                    else:
+                        set_login_code(email_clean, chosen_name, code)
+                        st.session_state.pending_login = {"name": chosen_name, "email": email_clean, "mode": "email_code"}
+                        st.success(f"Code sent to {email_clean}. Check your inbox.")
+                        st.rerun()
 
-[data-baseweb="select"] svg { fill: var(--ink-dim) !important; }
+    elif st.session_state.pending_login["mode"] == "admin_password":
+        st.subheader("Admin login")
+        pw = st.text_input("Enter the admin password", type="password")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Unlock admin", use_container_width=True):
+                admin_pw = st.secrets.get("ADMIN_PASSWORD", None)
+                if not admin_pw:
+                    st.error(
+                        "No admin password is configured. Set ADMIN_PASSWORD in your app's Secrets "
+                        "(Streamlit Cloud → Settings → Secrets)."
+                    )
+                elif pw == admin_pw:
+                    acct = create_or_get_account("admin", ADMIN_EMAIL, is_admin=True)
+                    token = generate_device_token()
+                    mark_verified_with_token(ADMIN_EMAIL, token)
+                    st.session_state.account = get_account_by_email(ADMIN_EMAIL)
+                    st.session_state.pending_login = None
+                    st.query_params["t"] = token
+                    log_admin_action("login")
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
+        with c2:
+            if st.button("Back", use_container_width=True, type="secondary"):
+                st.session_state.pending_login = None
+                st.rerun()
 
-/* ---- Buttons ---- */
+    elif st.session_state.pending_login["mode"] == "email_code":
+        pending = st.session_state.pending_login
+        st.subheader(f"Enter the 6-digit code sent to {pending['email']}")
+        code_input = st.text_input("Code", placeholder="123456", max_chars=6)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Verify", use_container_width=True):
+                if check_login_code(pending["email"], code_input.strip()):
+                    existing_acct = get_account_by_email(pending["email"])
+                    if existing_acct and existing_acct["suspended"]:
+                        st.error("This account has been suspended. Please contact Shaikh Zulqarnain.")
+                    else:
+                        create_or_get_account(pending["name"], pending["email"])
+                        token = generate_device_token()
+                        mark_verified_with_token(pending["email"], token)
+                        clear_login_code(pending["email"])
+                        st.session_state.account = get_account_by_email(pending["email"])
+                        st.session_state.pending_login = None
+                        st.query_params["t"] = token
+                        st.rerun()
+                else:
+                    st.error("Incorrect or expired code.")
+        with c2:
+            if st.button("Resend code", use_container_width=True, type="secondary"):
+                code = generate_code()
+                ok, err = send_verification_email(pending["email"], code)
+                if ok:
+                    set_login_code(pending["email"], pending["name"], code)
+                    st.success("New code sent.")
+                else:
+                    st.error(err)
+        if st.button("Use a different name or email", type="secondary"):
+            st.session_state.pending_login = None
+            st.rerun()
 
-.stButton button, .stFormSubmitButton button, .stDownloadButton button {
-    background: var(--paper-raised) !important;
-    color: var(--brass-bright) !important;
-    border: 1px solid var(--brass-dim) !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.02em;
-    transition: all 0.15s ease !important;
-}
+    render_footer()
+    st.stop()
 
-.stButton button:hover, .stFormSubmitButton button:hover, .stDownloadButton button:hover {
-    background: var(--brass) !important;
-    color: #14120f !important;
-    border-color: var(--brass) !important;
-}
 
-.stButton button[kind="primary"] {
-    background: var(--brass) !important;
-    color: #14120f !important;
-}
+# =========================================================================
+# LOGGED-IN APP
+# =========================================================================
 
-/* ---- Book rows ---- */
+account = st.session_state.account
+is_admin = bool(account["is_admin"])
 
-.book-row {
-    background: var(--paper-card);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 0.85rem 1rem;
-    margin-top: 0.6rem;
-}
+with st.sidebar:
+    st.subheader(account["name"])
+    st.caption(account["email"])
+    st.divider()
+    if is_admin:
+        nav = st.radio("Navigate", ["Reserve a book", "My reservations", "Admin panel"])
+    else:
+        nav = st.radio("Navigate", ["Reserve a book", "My reservations"])
+    st.divider()
+    if st.button("Log out", use_container_width=True):
+        do_logout()
+        st.rerun()
 
-.book-row-main {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
+items = all_book_items()
+counts = reservation_counts_by_book()
 
-.book-row-title {
-    font-family: 'Fraunces', serif;
-    font-size: 1.05rem;
-    font-weight: 500;
-    color: var(--ink);
-}
+# ---- Reserve a book ---------------------------------------------------
 
-.row-spacer { height: 0.6rem; }
+if nav == "Reserve a book":
+    render_header("The Book Desk", "Reserve a Book", "Pick a subject item and join the queue.")
 
-/* ---- Queue badges ---- */
+    subjects = list(SUBJECTS.keys())
+    tabs = st.tabs(subjects)
+    for tab, subject in zip(tabs, subjects):
+        with tab:
+            for item_type in SUBJECTS[subject]:
+                book_id = f"{subject}::{item_type}"
+                waiting = counts.get(book_id, 0)
+                already_in = student_already_in_queue(book_id, account["name"])
 
-.queue-badge {
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    padding: 0.25rem 0.6rem;
-    border-radius: 999px;
-    background: rgba(201, 161, 90, 0.12);
-    color: var(--brass);
-    border: 1px solid var(--brass-dim);
-}
+                with st.container(border=True):
+                    st.markdown(f"**{item_type}**")
+                    render_queue_badge(waiting)
 
-.queue-badge.empty {
-    background: rgba(127, 168, 118, 0.12);
-    color: var(--good);
-    border-color: rgba(127, 168, 118, 0.4);
-}
+                    if already_in:
+                        st.caption("You're already in the queue for this item.")
+                    else:
+                        with st.form(key=f"form_{book_id}", clear_on_submit=True, border=False):
+                            c1, c2 = st.columns([2, 1])
+                            with c1:
+                                needed_by = st.date_input(
+                                    "Needed by", value=datetime.date.today(),
+                                    min_value=datetime.date.today(), key=f"date_{book_id}"
+                                )
+                            with c2:
+                                submitted = st.form_submit_button("Join queue", use_container_width=True)
+                            if submitted:
+                                if student_already_in_queue(book_id, account["name"]):
+                                    st.error("You're already in the queue for this item.")
+                                else:
+                                    create_reservation(book_id, account["name"], needed_by.isoformat(), None, None)
+                                    st.success(f"Joined the queue for {item_type}.")
+                                    st.rerun()
 
-.queue-badge.busy {
-    background: rgba(200, 106, 90, 0.12);
-    color: var(--danger);
-    border-color: rgba(200, 106, 90, 0.4);
-}
+# ---- My reservations ---------------------------------------------------
 
-/* ---- Reservation / result cards ---- */
+elif nav == "My reservations":
+    render_header("The Book Desk", "My Reservations", "Your active spots in the queue.")
 
-.res-card {
-    background: var(--paper-card);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--brass);
-    border-radius: 8px;
-    padding: 0.8rem 1rem;
-    margin-top: 0.7rem;
-    margin-bottom: 0.3rem;
-}
+    my_res = get_reservations_for_student(account["name"])
+    if not my_res:
+        st.info("You have no active reservations.", icon="📭")
+    else:
+        for r in my_res:
+            subject, item_type = r["book_id"].split("::")
+            pos = get_queue_position(r["id"])
+            d_left = days_until(r["needed_by_date"])
+            due_text = f"{d_left} day(s) left" if d_left is not None and d_left >= 0 else "overdue" if d_left is not None else ""
+            with st.container(border=True):
+                st.markdown(f"**{subject} — {item_type}**")
+                st.caption(f"Position #{pos} in queue · needed by {r['needed_by_date']} · {due_text}")
+                if st.button("Cancel this reservation", key=f"cancel_{r['id']}"):
+                    cancel_reservation(r["id"])
+                    st.rerun()
 
-.res-card-title {
-    font-family: 'Fraunces', serif;
-    font-size: 1rem;
-    font-weight: 500;
-    color: var(--ink);
-    margin-bottom: 0.15rem;
-}
+# ---- Admin panel ---------------------------------------------------
 
-.res-card-meta {
-    font-size: 0.8rem;
-    color: var(--ink-dim);
-}
+elif nav == "Admin panel" and is_admin:
+    render_header("The Book Desk", "Admin Panel", "Manage the queue, students, and records.")
 
-.empty-state {
-    color: var(--ink-faint);
-    font-style: italic;
-    padding: 1.5rem 0;
-    text-align: center;
-    border: 1px dashed var(--line);
-    border-radius: 10px;
-    margin-top: 0.5rem;
-}
+    admin_tabs = st.tabs(["Queues", "All reservations", "Students", "Export & log"])
 
-/* ---- Log rows ---- */
+    with admin_tabs[0]:
+        subjects = list(SUBJECTS.keys())
+        pick_subject = st.selectbox("Subject", subjects)
+        for item_type in SUBJECTS[pick_subject]:
+            book_id = f"{pick_subject}::{item_type}"
+            queue = get_queue_for_book(book_id)
+            st.markdown(f"**{item_type}** — {len(queue)} waiting")
+            if not queue:
+                st.caption("No one waiting.")
+            for r in queue:
+                c1, c2, c3 = st.columns([3, 1, 1])
+                with c1:
+                    st.markdown(f"**{r['student_name']}** · needed by {r['needed_by_date']}")
+                with c2:
+                    if st.button("Fulfilled", key=f"fulfil_{r['id']}"):
+                        mark_fulfilled(r["id"])
+                        log_admin_action("mark_fulfilled", f"{r['student_name']} — {book_id}")
+                        st.rerun()
+                with c3:
+                    if st.button("Cancel", key=f"admincancel_{r['id']}"):
+                        cancel_reservation(r["id"])
+                        log_admin_action("cancel_reservation", f"{r['student_name']} — {book_id}")
+                        st.rerun()
+            st.divider()
 
-.log-row {
-    font-size: 0.78rem;
-    color: var(--ink-dim);
-    padding: 0.35rem 0;
-    border-bottom: 1px solid var(--line);
-}
+    with admin_tabs[1]:
+        all_res = get_all_reservations()
+        if not all_res:
+            st.info("No reservations yet.", icon="📭")
+        for r in all_res:
+            subject, item_type = r["book_id"].split("::")
+            with st.container(border=True):
+                st.markdown(f"**{r['student_name']} — {subject} ({item_type})**")
+                st.caption(f"status: {r['status']} · needed by {r['needed_by_date']} · returned: {'yes' if r['returned'] else 'no'}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if not r["returned"]:
+                        if st.button("Mark returned", key=f"ret_{r['id']}"):
+                            mark_returned(r["id"], datetime.date.today().isoformat())
+                            log_admin_action("mark_returned", f"{r['student_name']} — {r['book_id']}")
+                            st.rerun()
+                with c2:
+                    if st.button("Delete record", key=f"del_{r['id']}"):
+                        delete_reservation(r["id"])
+                        log_admin_action("delete_reservation", f"{r['student_name']} — {r['book_id']}")
+                        st.rerun()
 
-/* ---- Sidebar ---- */
+    with admin_tabs[2]:
+        accounts_list = get_all_accounts()
+        for a in accounts_list:
+            if a["email"].lower() == ADMIN_EMAIL.lower():
+                continue
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                status = "suspended" if a["suspended"] else "active"
+                st.markdown(f"**{a['name']}** · {a['email']} · {status}")
+            with c2:
+                if a["suspended"]:
+                    if st.button("Unsuspend", key=f"unsusp_{a['id']}"):
+                        set_suspended(a["email"], False)
+                        log_admin_action("unsuspend", a["email"])
+                        st.rerun()
+                else:
+                    if st.button("Suspend", key=f"susp_{a['id']}"):
+                        set_suspended(a["email"], True)
+                        log_admin_action("suspend", a["email"])
+                        st.rerun()
 
-[data-testid="stSidebar"] {
-    background: var(--paper-raised) !important;
-    border-right: 1px solid var(--line) !important;
-}
+    with admin_tabs[3]:
+        all_res = get_all_reservations()
+        if all_res:
+            import csv
+            import io
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=list(all_res[0].keys()))
+            writer.writeheader()
+            writer.writerows(all_res)
+            st.download_button(
+                "Download all reservations (CSV)",
+                data=buf.getvalue(),
+                file_name=f"reservations_{datetime.date.today().isoformat()}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.caption("No reservation data to export yet.")
 
-.side-name {
-    font-family: 'Fraunces', serif;
-    font-size: 1.15rem;
-    color: var(--brass-bright);
-    font-weight: 600;
-    margin-top: 0.5rem;
-}
+        st.divider()
+        st.subheader("Admin action log")
+        with get_conn() as conn:
+            logs = [dict(r) for r in conn.execute(
+                "SELECT * FROM admin_log ORDER BY id DESC LIMIT 50"
+            ).fetchall()]
+        if not logs:
+            st.caption("No actions logged yet.")
+        else:
+            st.dataframe(
+                logs,
+                use_container_width=True,
+                hide_index=True,
+                column_order=["timestamp", "action", "detail"],
+            )
 
-.side-email {
-    font-size: 0.78rem;
-    color: var(--ink-faint);
-    margin-bottom: 0.5rem;
-}
-
-[data-testid="stSidebar"] [data-testid="stRadio"] label {
-    color: var(--ink) !important;
-    font-size: 0.92rem;
-}
-
-/* ---- Tabs ---- */
-
-[data-testid="stTabs"] [data-baseweb="tab-list"] {
-    gap: 0.3rem;
-    border-bottom: 1px solid var(--line);
-}
-
-[data-testid="stTabs"] button[role="tab"] {
-    color: var(--ink-faint) !important;
-    font-weight: 600;
-    font-size: 0.85rem;
-}
-
-[data-testid="stTabs"] button[aria-selected="true"] {
-    color: var(--brass-bright) !important;
-    border-bottom-color: var(--brass) !important;
-}
-
-/* ---- Alerts ---- */
-
-[data-testid="stAlert"] {
-    border-radius: 8px !important;
-    background: var(--paper-card) !important;
-    border: 1px solid var(--line) !important;
-}
-
-/* ---- Footer ---- */
-
-.desk-footer {
-    margin-top: 3rem;
-    padding-top: 1.2rem;
-    border-top: 1px solid var(--line);
-    text-align: center;
-    font-size: 0.75rem;
-    color: var(--ink-faint);
-    letter-spacing: 0.02em;
-}
-
-.desk-footer .name {
-    color: var(--brass);
-    font-weight: 600;
-}
-"""
+render_footer()
