@@ -375,14 +375,331 @@ def generate_device_token():
 
 
 # =========================================================================
-# Helpers — pure Streamlit, no custom HTML/CSS involved anywhere.
+# DESIGN SYSTEM — "The Library Ledger"
+# Dark, minimal, brass-accented theme. Inlined as one plain (non-f) triple
+# quoted string — no Python interpolation happens inside it, so CSS braces
+# and quotes are never parsed as Python syntax. Wrapped in try/except so a
+# rendering issue here can never take down the rest of the app.
+# =========================================================================
+
+BOOK_DESK_CSS = """
+/* =========================================================================
+   THE BOOK DESK — "The Library Ledger"
+   Dark, minimal, brass-accented theme for Streamlit.
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+    --ink: #eae4d6;
+    --ink-dim: #a89f8c;
+    --ink-faint: #6f6857;
+    --paper: #14120f;
+    --paper-raised: #1c1912;
+    --paper-card: #201c15;
+    --brass: #c9a15a;
+    --brass-bright: #e3bd76;
+    --brass-dim: #7a6236;
+    --line: #35301f;
+    --danger: #c86a5a;
+    --good: #7fa876;
+}
+
+html, body, [data-testid="stAppViewContainer"] {
+    background: radial-gradient(ellipse at top, #1a170f 0%, var(--paper) 55%) !important;
+    color: var(--ink) !important;
+    font-family: 'Inter', -apple-system, sans-serif !important;
+}
+
+[data-testid="stHeader"] { background: transparent !important; }
+#MainMenu, footer { visibility: hidden; }
+
+.block-container {
+    max-width: 780px !important;
+    padding-top: 2.5rem !important;
+    padding-bottom: 4rem !important;
+}
+
+/* ---- Header ---- */
+
+.desk-header { margin-bottom: 1.75rem; }
+
+.desk-eyebrow {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+
+.desk-title {
+    font-family: 'Fraunces', serif;
+    font-size: 2.4rem;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.1;
+    margin-bottom: 0.4rem;
+}
+
+.desk-sub {
+    font-size: 0.95rem;
+    color: var(--ink-dim);
+    margin-bottom: 1rem;
+}
+
+.desk-header-rule {
+    height: 1px;
+    background: linear-gradient(90deg, var(--brass-dim), transparent 70%);
+    margin-top: 0.5rem;
+}
+
+/* ---- Section labels ---- */
+
+.section-label {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 600;
+    margin: 1.1rem 0 0.4rem 0;
+}
+
+/* ---- Inputs ---- */
+
+[data-testid="stTextInput"] input,
+[data-testid="stDateInput"] input,
+[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+    background: var(--paper-raised) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 8px !important;
+    color: var(--ink) !important;
+}
+
+[data-testid="stTextInput"] input:focus,
+[data-testid="stDateInput"] input:focus {
+    border-color: var(--brass) !important;
+    box-shadow: 0 0 0 1px var(--brass) !important;
+}
+
+[data-testid="stSelectbox"] label,
+[data-testid="stTextInput"] label,
+[data-testid="stDateInput"] label,
+[data-testid="stRadio"] label {
+    color: var(--ink-dim) !important;
+}
+
+[data-baseweb="select"] svg { fill: var(--ink-dim) !important; }
+
+/* ---- Buttons ---- */
+
+.stButton button, .stFormSubmitButton button, .stDownloadButton button {
+    background: var(--paper-raised) !important;
+    color: var(--brass-bright) !important;
+    border: 1px solid var(--brass-dim) !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em;
+    transition: all 0.15s ease !important;
+}
+
+.stButton button:hover, .stFormSubmitButton button:hover, .stDownloadButton button:hover {
+    background: var(--brass) !important;
+    color: #14120f !important;
+    border-color: var(--brass) !important;
+}
+
+.stButton button[kind="primary"] {
+    background: var(--brass) !important;
+    color: #14120f !important;
+}
+
+/* ---- Book rows ---- */
+
+.book-row {
+    background: var(--paper-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    margin-top: 0.6rem;
+}
+
+.book-row-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.book-row-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--ink);
+}
+
+.row-spacer { height: 0.6rem; }
+
+/* ---- Queue badges ---- */
+
+.queue-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(201, 161, 90, 0.12);
+    color: var(--brass);
+    border: 1px solid var(--brass-dim);
+}
+
+.queue-badge.empty {
+    background: rgba(127, 168, 118, 0.12);
+    color: var(--good);
+    border-color: rgba(127, 168, 118, 0.4);
+}
+
+.queue-badge.busy {
+    background: rgba(200, 106, 90, 0.12);
+    color: var(--danger);
+    border-color: rgba(200, 106, 90, 0.4);
+}
+
+/* ---- Reservation / result cards ---- */
+
+.res-card {
+    background: var(--paper-card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--brass);
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    margin-top: 0.7rem;
+    margin-bottom: 0.3rem;
+}
+
+.res-card-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 0.15rem;
+}
+
+.res-card-meta {
+    font-size: 0.8rem;
+    color: var(--ink-dim);
+}
+
+.empty-state {
+    color: var(--ink-faint);
+    font-style: italic;
+    padding: 1.5rem 0;
+    text-align: center;
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    margin-top: 0.5rem;
+}
+
+/* ---- Log rows ---- */
+
+.log-row {
+    font-size: 0.78rem;
+    color: var(--ink-dim);
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--line);
+}
+
+/* ---- Sidebar ---- */
+
+[data-testid="stSidebar"] {
+    background: var(--paper-raised) !important;
+    border-right: 1px solid var(--line) !important;
+}
+
+.side-name {
+    font-family: 'Fraunces', serif;
+    font-size: 1.15rem;
+    color: var(--brass-bright);
+    font-weight: 600;
+    margin-top: 0.5rem;
+}
+
+.side-email {
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+    margin-bottom: 0.5rem;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    color: var(--ink) !important;
+    font-size: 0.92rem;
+}
+
+/* ---- Tabs ---- */
+
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    gap: 0.3rem;
+    border-bottom: 1px solid var(--line);
+}
+
+[data-testid="stTabs"] button[role="tab"] {
+    color: var(--ink-faint) !important;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+[data-testid="stTabs"] button[aria-selected="true"] {
+    color: var(--brass-bright) !important;
+    border-bottom-color: var(--brass) !important;
+}
+
+/* ---- Alerts ---- */
+
+[data-testid="stAlert"] {
+    border-radius: 8px !important;
+    background: var(--paper-card) !important;
+    border: 1px solid var(--line) !important;
+}
+
+/* ---- Footer ---- */
+
+.desk-footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+}
+
+.desk-footer .name {
+    color: var(--brass);
+    font-weight: 600;
+}
+
+"""
+
+try:
+    st.markdown("<style>" + BOOK_DESK_CSS + "</style>", unsafe_allow_html=True)
+except Exception:
+    pass
+
+
+# =========================================================================
+# Helpers
 # =========================================================================
 
 def render_header(eyebrow, title, sub):
-    st.caption(eyebrow.upper())
-    st.title(title)
-    st.caption(sub)
-    st.divider()
+    st.markdown(f"""
+    <div class="desk-header">
+        <div class="desk-eyebrow">{eyebrow}</div>
+        <div class="desk-title">{title}</div>
+        <div class="desk-sub">{sub}</div>
+        <div class="desk-header-rule"></div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def days_until(date_str):
@@ -393,19 +710,21 @@ def days_until(date_str):
         return None
 
 
-def render_queue_badge(count):
-    """Shows a small colored status line for how many students are waiting."""
+def render_queue_badge_html(count):
     if count == 0:
-        st.success("Available — no one waiting", icon="✅")
-    elif count == 1:
-        st.info(f"{count} student waiting", icon="⏳")
+        return '<span class="queue-badge empty">available</span>'
+    elif count >= 2:
+        return f'<span class="queue-badge busy">{count} waiting</span>'
     else:
-        st.warning(f"{count} students waiting", icon="⏳")
+        return f'<span class="queue-badge">{count} waiting</span>'
 
 
 def render_footer():
-    st.divider()
-    st.caption("Built for Shaikh Zulqarnain · developed by Serene")
+    st.markdown("""
+    <div class="desk-footer">
+        Built for Shaikh Zulqarnain &nbsp;·&nbsp; developed by <span class="name">Serene</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =========================================================================
@@ -440,8 +759,11 @@ if st.session_state.account is None:
     render_header("Shaikh Zulqarnain · 10th A", "The Book Desk", "Log in to reserve books or manage the desk.")
 
     if st.session_state.pending_login is None:
-        chosen_name = st.selectbox("Select your name", NAME_OPTIONS)
-        email_input = st.text_input("Your email address", placeholder="you@example.com")
+        st.markdown('<span class="section-label">Select your name</span>', unsafe_allow_html=True)
+        chosen_name = st.selectbox("Name", NAME_OPTIONS, label_visibility="collapsed")
+
+        st.markdown('<span class="section-label">Your email address</span>', unsafe_allow_html=True)
+        email_input = st.text_input("Email", label_visibility="collapsed", placeholder="you@example.com")
 
         if st.button("Continue", use_container_width=True):
             email_clean = email_input.strip().lower()
@@ -469,8 +791,8 @@ if st.session_state.account is None:
                         st.rerun()
 
     elif st.session_state.pending_login["mode"] == "admin_password":
-        st.subheader("Admin login")
-        pw = st.text_input("Enter the admin password", type="password")
+        st.markdown('<span class="section-label">Admin login — enter the admin password</span>', unsafe_allow_html=True)
+        pw = st.text_input("Password", type="password", label_visibility="collapsed")
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Unlock admin", use_container_width=True):
@@ -498,8 +820,11 @@ if st.session_state.account is None:
 
     elif st.session_state.pending_login["mode"] == "email_code":
         pending = st.session_state.pending_login
-        st.subheader(f"Enter the 6-digit code sent to {pending['email']}")
-        code_input = st.text_input("Code", placeholder="123456", max_chars=6)
+        st.markdown(
+            f'<span class="section-label">Enter the 6-digit code sent to {pending["email"]}</span>',
+            unsafe_allow_html=True
+        )
+        code_input = st.text_input("Code", label_visibility="collapsed", placeholder="123456", max_chars=6)
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Verify", use_container_width=True):
@@ -543,14 +868,14 @@ account = st.session_state.account
 is_admin = bool(account["is_admin"])
 
 with st.sidebar:
-    st.subheader(account["name"])
-    st.caption(account["email"])
-    st.divider()
+    st.markdown(f'<div class="side-name">{account["name"]}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="side-email">{account["email"]}</div>', unsafe_allow_html=True)
+    st.markdown("---")
     if is_admin:
-        nav = st.radio("Navigate", ["Reserve a book", "My reservations", "Admin panel"])
+        nav = st.radio("Navigate", ["Reserve a book", "My reservations", "Admin panel"], label_visibility="collapsed")
     else:
-        nav = st.radio("Navigate", ["Reserve a book", "My reservations"])
-    st.divider()
+        nav = st.radio("Navigate", ["Reserve a book", "My reservations"], label_visibility="collapsed")
+    st.markdown("---")
     if st.button("Log out", use_container_width=True):
         do_logout()
         st.rerun()
@@ -572,29 +897,36 @@ if nav == "Reserve a book":
                 waiting = counts.get(book_id, 0)
                 already_in = student_already_in_queue(book_id, account["name"])
 
-                with st.container(border=True):
-                    st.markdown(f"**{item_type}**")
-                    render_queue_badge(waiting)
+                st.markdown(f"""
+                <div class="book-row">
+                    <div class="book-row-main">
+                        <div class="book-row-title">{item_type}</div>
+                        {render_queue_badge_html(waiting)}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-                    if already_in:
-                        st.caption("You're already in the queue for this item.")
-                    else:
-                        with st.form(key=f"form_{book_id}", clear_on_submit=True, border=False):
-                            c1, c2 = st.columns([2, 1])
-                            with c1:
-                                needed_by = st.date_input(
-                                    "Needed by", value=datetime.date.today(),
-                                    min_value=datetime.date.today(), key=f"date_{book_id}"
-                                )
-                            with c2:
-                                submitted = st.form_submit_button("Join queue", use_container_width=True)
-                            if submitted:
-                                if student_already_in_queue(book_id, account["name"]):
-                                    st.error("You're already in the queue for this item.")
-                                else:
-                                    create_reservation(book_id, account["name"], needed_by.isoformat(), None, None)
-                                    st.success(f"Joined the queue for {item_type}.")
-                                    st.rerun()
+                if already_in:
+                    st.caption("You're already in the queue for this item.")
+                else:
+                    with st.form(key=f"form_{book_id}", clear_on_submit=True, border=False):
+                        c1, c2 = st.columns([2, 1])
+                        with c1:
+                            needed_by = st.date_input(
+                                "Needed by", value=datetime.date.today(),
+                                min_value=datetime.date.today(), key=f"date_{book_id}",
+                                label_visibility="collapsed"
+                            )
+                        with c2:
+                            submitted = st.form_submit_button("Join queue", use_container_width=True)
+                        if submitted:
+                            if student_already_in_queue(book_id, account["name"]):
+                                st.error("You're already in the queue for this item.")
+                            else:
+                                create_reservation(book_id, account["name"], needed_by.isoformat(), None, None)
+                                st.success(f"Joined the queue for {item_type}.")
+                                st.rerun()
+                st.markdown('<div class="row-spacer"></div>', unsafe_allow_html=True)
 
 # ---- My reservations ---------------------------------------------------
 
@@ -603,19 +935,22 @@ elif nav == "My reservations":
 
     my_res = get_reservations_for_student(account["name"])
     if not my_res:
-        st.info("You have no active reservations.", icon="📭")
+        st.markdown('<div class="empty-state">You have no active reservations.</div>', unsafe_allow_html=True)
     else:
         for r in my_res:
             subject, item_type = r["book_id"].split("::")
             pos = get_queue_position(r["id"])
             d_left = days_until(r["needed_by_date"])
             due_text = f"{d_left} day(s) left" if d_left is not None and d_left >= 0 else "overdue" if d_left is not None else ""
-            with st.container(border=True):
-                st.markdown(f"**{subject} — {item_type}**")
-                st.caption(f"Position #{pos} in queue · needed by {r['needed_by_date']} · {due_text}")
-                if st.button("Cancel this reservation", key=f"cancel_{r['id']}"):
-                    cancel_reservation(r["id"])
-                    st.rerun()
+            st.markdown(f"""
+            <div class="res-card">
+                <div class="res-card-title">{subject} — {item_type}</div>
+                <div class="res-card-meta">Position <b>#{pos}</b> in queue &nbsp;·&nbsp; needed by {r['needed_by_date']} &nbsp;·&nbsp; {due_text}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Cancel this reservation", key=f"cancel_{r['id']}"):
+                cancel_reservation(r["id"])
+                st.rerun()
 
 # ---- Admin panel ---------------------------------------------------
 
@@ -630,7 +965,7 @@ elif nav == "Admin panel" and is_admin:
         for item_type in SUBJECTS[pick_subject]:
             book_id = f"{pick_subject}::{item_type}"
             queue = get_queue_for_book(book_id)
-            st.markdown(f"**{item_type}** — {len(queue)} waiting")
+            st.markdown(f'<div class="section-label">{item_type} — {len(queue)} waiting</div>', unsafe_allow_html=True)
             if not queue:
                 st.caption("No one waiting.")
             for r in queue:
@@ -647,29 +982,32 @@ elif nav == "Admin panel" and is_admin:
                         cancel_reservation(r["id"])
                         log_admin_action("cancel_reservation", f"{r['student_name']} — {book_id}")
                         st.rerun()
-            st.divider()
+            st.markdown('<div class="row-spacer"></div>', unsafe_allow_html=True)
 
     with admin_tabs[1]:
         all_res = get_all_reservations()
         if not all_res:
-            st.info("No reservations yet.", icon="📭")
+            st.markdown('<div class="empty-state">No reservations yet.</div>', unsafe_allow_html=True)
         for r in all_res:
             subject, item_type = r["book_id"].split("::")
-            with st.container(border=True):
-                st.markdown(f"**{r['student_name']} — {subject} ({item_type})**")
-                st.caption(f"status: {r['status']} · needed by {r['needed_by_date']} · returned: {'yes' if r['returned'] else 'no'}")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if not r["returned"]:
-                        if st.button("Mark returned", key=f"ret_{r['id']}"):
-                            mark_returned(r["id"], datetime.date.today().isoformat())
-                            log_admin_action("mark_returned", f"{r['student_name']} — {r['book_id']}")
-                            st.rerun()
-                with c2:
-                    if st.button("Delete record", key=f"del_{r['id']}"):
-                        delete_reservation(r["id"])
-                        log_admin_action("delete_reservation", f"{r['student_name']} — {r['book_id']}")
+            st.markdown(f"""
+            <div class="res-card">
+                <div class="res-card-title">{r['student_name']} — {subject} ({item_type})</div>
+                <div class="res-card-meta">status: {r['status']} &nbsp;·&nbsp; needed by {r['needed_by_date']} &nbsp;·&nbsp; returned: {'yes' if r['returned'] else 'no'}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                if not r["returned"]:
+                    if st.button("Mark returned", key=f"ret_{r['id']}"):
+                        mark_returned(r["id"], datetime.date.today().isoformat())
+                        log_admin_action("mark_returned", f"{r['student_name']} — {r['book_id']}")
                         st.rerun()
+            with c2:
+                if st.button("Delete record", key=f"del_{r['id']}"):
+                    delete_reservation(r["id"])
+                    log_admin_action("delete_reservation", f"{r['student_name']} — {r['book_id']}")
+                    st.rerun()
 
     with admin_tabs[2]:
         accounts_list = get_all_accounts()
@@ -711,8 +1049,7 @@ elif nav == "Admin panel" and is_admin:
         else:
             st.caption("No reservation data to export yet.")
 
-        st.divider()
-        st.subheader("Admin action log")
+        st.markdown('<div class="section-label">Admin action log</div>', unsafe_allow_html=True)
         with get_conn() as conn:
             logs = [dict(r) for r in conn.execute(
                 "SELECT * FROM admin_log ORDER BY id DESC LIMIT 50"
