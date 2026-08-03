@@ -162,6 +162,17 @@ def create_or_get_account(name, email, is_admin=False):
     return get_account_by_email(email)
 
 
+def force_admin_flag(email):
+    """Guarantees the admin account always has is_admin=1, even if it was
+    previously created as a regular student account before the admin
+    password flow was ever used for it."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE accounts SET is_admin = 1 WHERE email = ?",
+            (email.strip().lower(),)
+        )
+
+
 def mark_verified_with_token(email, device_token):
     with get_conn() as conn:
         conn.execute(
@@ -375,38 +386,42 @@ def generate_device_token():
 
 
 # =========================================================================
-# DESIGN SYSTEM — "The Library Ledger"
-# Dark, minimal, brass-accented theme. Inlined as one plain (non-f) triple
-# quoted string — no Python interpolation happens inside it, so CSS braces
-# and quotes are never parsed as Python syntax. Wrapped in try/except so a
-# rendering issue here can never take down the rest of the app.
+# DESIGN SYSTEM — "Serene Falah" theme
+# Deep ink background, cyan glow accent, Fraunces/Amiri headings. Inlined
+# as one plain (non-f) triple quoted string — no Python interpolation
+# happens inside it, so CSS braces and quotes are never parsed as Python
+# syntax. Wrapped in try/except so a rendering issue here can never take
+# down the rest of the app.
 # =========================================================================
 
 BOOK_DESK_CSS = """
 /* =========================================================================
-   THE BOOK DESK — "The Library Ledger"
-   Dark, minimal, brass-accented theme for Streamlit.
+   THE BOOK DESK — "Serene Falah" theme
+   Deep ink background, cyan glow accent, Fraunces serif headings, Amiri
+   for any Arabic text, hairline borders instead of solid card outlines.
    ========================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@300;400;500;600;700&family=Amiri:wght@400;700&display=swap');
 
 :root {
-    --ink: #eae4d6;
-    --ink-dim: #a89f8c;
-    --ink-faint: #6f6857;
-    --paper: #14120f;
-    --paper-raised: #1c1912;
-    --paper-card: #201c15;
-    --brass: #c9a15a;
-    --brass-bright: #e3bd76;
-    --brass-dim: #7a6236;
-    --line: #35301f;
-    --danger: #c86a5a;
-    --good: #7fa876;
+    --ink: #eaf6f8;
+    --ink-dim: #9db4bc;
+    --ink-faint: #62777e;
+    --paper: #070f14;
+    --paper-raised: #0d1a21;
+    --paper-card: #10202a;
+    --gold: #2fb8c9;
+    --gold-bright: #7fe3f0;
+    --gold-dim: #1c5b64;
+    --line: rgba(78, 200, 217, 0.22);
+    --danger: #e0796a;
+    --good: #6fc79a;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
-    background: radial-gradient(ellipse at top, #1a170f 0%, var(--paper) 55%) !important;
+    background:
+        radial-gradient(circle at 50% 0%, rgba(47, 184, 201, 0.10), transparent 60%),
+        var(--paper) !important;
     color: var(--ink) !important;
     font-family: 'Inter', -apple-system, sans-serif !important;
 }
@@ -429,15 +444,28 @@ html, body, [data-testid="stAppViewContainer"] {
     font-size: 0.72rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: var(--brass);
+    color: var(--gold-bright);
     font-weight: 600;
     margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.desk-eyebrow::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    transform: rotate(45deg);
+    background: var(--gold);
+    display: inline-block;
 }
 
 .desk-title {
     font-family: 'Fraunces', serif;
     font-size: 2.4rem;
-    font-weight: 600;
+    font-weight: 500;
+    letter-spacing: -0.01em;
     color: var(--ink);
     line-height: 1.1;
     margin-bottom: 0.4rem;
@@ -446,12 +474,13 @@ html, body, [data-testid="stAppViewContainer"] {
 .desk-sub {
     font-size: 0.95rem;
     color: var(--ink-dim);
+    font-weight: 300;
     margin-bottom: 1rem;
 }
 
 .desk-header-rule {
     height: 1px;
-    background: linear-gradient(90deg, var(--brass-dim), transparent 70%);
+    background: linear-gradient(90deg, var(--gold-dim), transparent 70%);
     margin-top: 0.5rem;
 }
 
@@ -462,7 +491,7 @@ html, body, [data-testid="stAppViewContainer"] {
     font-size: 0.72rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--brass);
+    color: var(--gold-bright);
     font-weight: 600;
     margin: 1.1rem 0 0.4rem 0;
 }
@@ -480,8 +509,8 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stTextInput"] input:focus,
 [data-testid="stDateInput"] input:focus {
-    border-color: var(--brass) !important;
-    box-shadow: 0 0 0 1px var(--brass) !important;
+    border-color: var(--gold) !important;
+    box-shadow: 0 0 0 1px var(--gold) !important;
 }
 
 [data-testid="stSelectbox"] label,
@@ -493,27 +522,30 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-baseweb="select"] svg { fill: var(--ink-dim) !important; }
 
-/* ---- Buttons ---- */
+/* ---- Buttons — pill-shaped, cyan fill, shimmer on hover ---- */
 
 .stButton button, .stFormSubmitButton button, .stDownloadButton button {
-    background: var(--paper-raised) !important;
-    color: var(--brass-bright) !important;
-    border: 1px solid var(--brass-dim) !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
+    background: transparent !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 999px !important;
+    font-weight: 500 !important;
     letter-spacing: 0.02em;
-    transition: all 0.15s ease !important;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease, color 0.25s ease !important;
 }
 
 .stButton button:hover, .stFormSubmitButton button:hover, .stDownloadButton button:hover {
-    background: var(--brass) !important;
-    color: #14120f !important;
-    border-color: var(--brass) !important;
+    background: var(--gold) !important;
+    color: var(--paper) !important;
+    border-color: var(--gold) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px -12px rgba(47, 184, 201, 0.55);
 }
 
 .stButton button[kind="primary"] {
-    background: var(--brass) !important;
-    color: #14120f !important;
+    background: var(--gold) !important;
+    color: var(--paper) !important;
+    border-color: var(--gold) !important;
 }
 
 /* ---- Book rows ---- */
@@ -521,7 +553,7 @@ html, body, [data-testid="stAppViewContainer"] {
 .book-row {
     background: var(--paper-card);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: 14px;
     padding: 0.85rem 1rem;
     margin-top: 0.6rem;
 }
@@ -549,21 +581,21 @@ html, body, [data-testid="stAppViewContainer"] {
     letter-spacing: 0.03em;
     padding: 0.25rem 0.6rem;
     border-radius: 999px;
-    background: rgba(201, 161, 90, 0.12);
-    color: var(--brass);
-    border: 1px solid var(--brass-dim);
+    background: rgba(47, 184, 201, 0.12);
+    color: var(--gold-bright);
+    border: 1px solid var(--gold-dim);
 }
 
 .queue-badge.empty {
-    background: rgba(127, 168, 118, 0.12);
+    background: rgba(111, 199, 154, 0.12);
     color: var(--good);
-    border-color: rgba(127, 168, 118, 0.4);
+    border-color: rgba(111, 199, 154, 0.4);
 }
 
 .queue-badge.busy {
-    background: rgba(200, 106, 90, 0.12);
+    background: rgba(224, 121, 106, 0.12);
     color: var(--danger);
-    border-color: rgba(200, 106, 90, 0.4);
+    border-color: rgba(224, 121, 106, 0.4);
 }
 
 /* ---- Reservation / result cards ---- */
@@ -571,8 +603,8 @@ html, body, [data-testid="stAppViewContainer"] {
 .res-card {
     background: var(--paper-card);
     border: 1px solid var(--line);
-    border-left: 3px solid var(--brass);
-    border-radius: 8px;
+    border-left: 3px solid var(--gold);
+    border-radius: 12px;
     padding: 0.8rem 1rem;
     margin-top: 0.7rem;
     margin-bottom: 0.3rem;
@@ -597,17 +629,8 @@ html, body, [data-testid="stAppViewContainer"] {
     padding: 1.5rem 0;
     text-align: center;
     border: 1px dashed var(--line);
-    border-radius: 10px;
+    border-radius: 14px;
     margin-top: 0.5rem;
-}
-
-/* ---- Log rows ---- */
-
-.log-row {
-    font-size: 0.78rem;
-    color: var(--ink-dim);
-    padding: 0.35rem 0;
-    border-bottom: 1px solid var(--line);
 }
 
 /* ---- Sidebar ---- */
@@ -616,12 +639,11 @@ html, body, [data-testid="stAppViewContainer"] {
     background: var(--paper-raised) !important;
     border-right: 1px solid var(--line) !important;
 }
-
 .side-name {
     font-family: 'Fraunces', serif;
     font-size: 1.15rem;
-    color: var(--brass-bright);
-    font-weight: 600;
+    color: var(--gold-bright);
+    font-weight: 500;
     margin-top: 0.5rem;
 }
 
@@ -645,21 +667,29 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stTabs"] button[role="tab"] {
     color: var(--ink-faint) !important;
-    font-weight: 600;
+    font-weight: 500;
     font-size: 0.85rem;
 }
 
 [data-testid="stTabs"] button[aria-selected="true"] {
-    color: var(--brass-bright) !important;
-    border-bottom-color: var(--brass) !important;
+    color: var(--gold-bright) !important;
+    border-bottom-color: var(--gold) !important;
 }
 
 /* ---- Alerts ---- */
 
 [data-testid="stAlert"] {
-    border-radius: 8px !important;
+    border-radius: 12px !important;
     background: var(--paper-card) !important;
     border: 1px solid var(--line) !important;
+}
+
+/* ---- Dataframe (admin log) ---- */
+
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--line) !important;
+    border-radius: 12px !important;
+    overflow: hidden;
 }
 
 /* ---- Footer ---- */
@@ -675,10 +705,9 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .desk-footer .name {
-    color: var(--brass);
-    font-weight: 600;
+    color: var(--gold-bright);
+    font-weight: 500;
 }
-
 """
 
 try:
@@ -722,7 +751,7 @@ def render_queue_badge_html(count):
 def render_footer():
     st.markdown("""
     <div class="desk-footer">
-        Built for Shaikh Zulqarnain &nbsp;·&nbsp; developed by <span class="name">Serene</span>
+        Developed by <span class="name">Shaikh Zulqarnain</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -804,6 +833,7 @@ if st.session_state.account is None:
                     )
                 elif pw == admin_pw:
                     acct = create_or_get_account("admin", ADMIN_EMAIL, is_admin=True)
+                    force_admin_flag(ADMIN_EMAIL)
                     token = generate_device_token()
                     mark_verified_with_token(ADMIN_EMAIL, token)
                     st.session_state.account = get_account_by_email(ADMIN_EMAIL)
