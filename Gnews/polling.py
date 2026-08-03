@@ -345,248 +345,196 @@ def generate_device_token():
     return pysecrets.token_urlsafe(24)
 
 
+
 # =========================================================================
 # DESIGN SYSTEM — "The Library Ledger"
-# A dark, minimal, professional theme inspired by premium editorial sites:
-# near-black ink base, warm brass/amber glow accent (library-stamp, reading-
-# lamp feel), serif display type over clean sans body, monospace for ticket
-# data. Every native Streamlit control is restyled to disappear into this
-# language — no default Streamlit look should be visible anywhere.
-#
-# Signature element: the "ticket stub" — a perforated hold-slip card with a
-# torn edge and punched notch, echoing a physical library due-date card.
+# Dark, minimal, brass-accented theme. The CSS lives in a separate plain
+# text file (style.css) rather than a giant string inside this file, on
+# purpose: a plain CSS file can be partially truncated by a bad copy/paste
+# and the app will just look a bit plain — it can never cause a Python
+# SyntaxError and crash the whole app the way a broken triple-quoted
+# string can. Keep style.css in the same folder as app.py.
 # =========================================================================
 
-CSS = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Lora:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,500&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+import os
 
-:root {
-    --ink: #0A0E0C;
-    --ink-1: #0F1512;
-    --ink-2: #151C18;
-    --ink-3: #1E2621;
-    --brass: #C9A227;
-    --brass-bright: #F0C94A;
-    --brass-dim: #8A6D1F;
-    --text: #EDEAE0;
-    --text-dim: #9C9A8E;
-    --text-faint: #6B6A61;
-    --hairline: rgba(201,162,39,0.16);
-    --hairline-bright: rgba(201,162,39,0.34);
-    --danger: #C9573B;
-    --success: #6B9B6E;
-    --radius-s: 6px;
-    --radius-m: 12px;
-    --radius-l: 20px;
-    --ease: cubic-bezier(.22,.61,.36,1);
-    --serif: 'Lora', 'Georgia', serif;
-    --sans: 'Inter', system-ui, sans-serif;
-    --mono: 'JetBrains Mono', monospace;
-}
+def load_css():
+    css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "style.css")
+    try:
+        with open(css_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return ""  # if the file is missing/broken, app still runs — just unstyled
 
-/* ---- Nuke Streamlit chrome ------------------------------------------- */
-#MainMenu, header[data-testid="stHeader"], footer, .stDeployButton,
-div[data-testid="stToolbar"], div[data-testid="stDecoration"],
-div[data-testid="stStatusWidget"] {
-    display: none !important;
-}
-.stApp {
-    background:
-        radial-gradient(circle at 15% 0%, rgba(201,162,39,.07), transparent 45%),
-        radial-gradient(circle at 85% 100%, rgba(201,162,39,.05), transparent 50%),
-        var(--ink) !important;
-}
-.stApp, .stApp * {
-    font-family: var(--sans);
-}
-body, .stApp, [data-testid="stAppViewContainer"] {
-    color: var(--text) !important;
-}
-.block-container {
-    max-width: 760px !important;
-    padding-top: 2.5rem !important;
-    padding-bottom: 5rem !important;
-}
-h1, h2, h3, h4 {
-    font-family: var(--serif) !important;
-    color: var(--text) !important;
-    letter-spacing: -0.01em;
-    font-weight: 500 !important;
-}
+st.markdown(f"<style>{load_css()}</style>", unsafe_allow_html=True)
 
-/* ---- Grain texture overlay -------------------------------------------- */
-.grain-overlay {
-    position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    opacity: .025; mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
+# =========================================================================
+# Helpers
+# =========================================================================
 
-/* ---- Header block ------------------------------------------------------ */
-.desk-header { margin-bottom: 36px; position: relative; z-index: 1; }
-.desk-eyebrow {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-family: var(--mono);
-    font-size: 0.7rem;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--brass-bright);
-}
-.desk-eyebrow::before {
-    content: ''; width: 6px; height: 6px; transform: rotate(45deg);
-    background: var(--brass); display: inline-block;
-    box-shadow: 0 0 8px rgba(201,162,39,.7);
-}
-.desk-title {
-    font-family: var(--serif);
-    font-weight: 500;
-    font-size: 2.4rem;
-    color: var(--text);
-    margin: 10px 0 6px 0;
-    letter-spacing: -0.015em;
-}
-.desk-sub {
-    font-size: 0.96rem;
-    color: var(--text-dim);
-    font-weight: 300;
-    max-width: 46ch;
-}
-.desk-header-rule {
-    margin-top: 24px;
-    height: 1px;
-    background: linear-gradient(to right, var(--hairline-bright), transparent 70%);
-}
+def render_header(eyebrow, title, sub):
+    st.markdown(f"""
+    <div class="desk-header">
+        <div class="desk-eyebrow">{eyebrow}</div>
+        <div class="desk-title">{title}</div>
+        <div class="desk-sub">{sub}</div>
+        <div class="desk-header-rule"></div>
+    </div>
+    """, unsafe_allow_html=True)
 
-/* ---- Session badge ------------------------------------------------------ */
-.session-bar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 0 18px 0;
-    position: relative; z-index: 1;
-}
-.session-badge {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-family: var(--mono);
-    font-size: 0.74rem;
-    letter-spacing: 0.04em;
-    padding: 6px 14px;
-    border-radius: 999px;
-    border: 1px solid var(--hairline);
-    background: var(--ink-2);
-    color: var(--text-dim);
-}
-.session-badge .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--brass); box-shadow: 0 0 6px rgba(201,162,39,.8);
-}
-.session-badge.admin { border-color: var(--hairline-bright); color: var(--brass-bright); }
 
-/* ---- Ticket stub — the signature element ------------------------------- */
-.ticket {
-    position: relative;
-    background: var(--ink-2);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-m);
-    padding: 18px 22px;
-    margin-bottom: 16px;
-    overflow: visible;
-    transition: border-color .3s var(--ease), transform .3s var(--ease), box-shadow .3s var(--ease);
-}
-.ticket:hover {
-    border-color: var(--hairline-bright);
-    box-shadow: 0 8px 28px -14px rgba(201,162,39,.35);
-}
-.ticket.mine { border-color: var(--hairline-bright); background: linear-gradient(150deg, var(--ink-2), var(--ink-3)); }
-/* Perforated notch on the left edge, like a torn ticket stub */
-.ticket::before {
-    content: '';
-    position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
-    width: 16px; height: 16px; border-radius: 50%;
-    background: var(--ink);
-    border: 1px solid var(--hairline);
-}
-.ticket-pos {
-    font-family: var(--mono);
-    font-weight: 600;
-    font-size: 1.7rem;
-    color: var(--text-dim);
-    float: right;
-    line-height: 1;
-    opacity: 0.85;
-}
-.ticket-pos.first { color: var(--brass-bright); text-shadow: 0 0 14px rgba(240,201,74,.4); }
-.ticket-name {
-    font-family: var(--serif);
-    font-weight: 500;
-    font-size: 1.08rem;
-    color: var(--text);
-}
-.ticket-meta {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.03em;
-    color: var(--text-faint);
-    margin-top: 6px;
-}
+def days_until(date_str):
+    try:
+        target = datetime.date.fromisoformat(date_str)
+        return (target - datetime.date.today()).days
+    except Exception:
+        return None
 
-/* ---- Book / catalog cards ----------------------------------------------- */
-.book-card {
-    background: var(--ink-2);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-s);
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    transition: border-color .25s var(--ease);
-}
-.book-card:hover { border-color: var(--hairline-bright); }
-.book-card .item-type { font-size: 0.88rem; color: var(--text-dim); }
-.queue-badge {
-    display: inline-block;
-    font-family: var(--mono);
-    font-size: 0.68rem;
-    font-weight: 500;
-    padding: 3px 10px;
-    border-radius: 20px;
-    background: var(--ink-3);
-    color: var(--text-dim);
-    float: right;
-    border: 1px solid var(--hairline);
-}
-.queue-badge.empty { background: rgba(107,155,110,0.1); color: var(--success); border-color: rgba(107,155,110,0.25); }
-.queue-badge.busy { background: rgba(201,87,59,0.1); color: var(--danger); border-color: rgba(201,87,59,0.25); }
 
-/* ---- Divider ------------------------------------------------------------ */
-.thin-rule { border: none; border-top: 1px solid var(--hairline); margin: 30px 0; }
+def render_queue_badge_html(count):
+    if count == 0:
+        return '<span class="queue-badge empty">available</span>'
+    elif count >= 2:
+        return f'<span class="queue-badge busy">{count} waiting</span>'
+    else:
+        return f'<span class="queue-badge">{count} waiting</span>'
 
-.empty-note {
-    font-style: italic;
-    color: var(--text-faint);
-    font-size: 0.9rem;
-    padding: 14px 0;
-}
 
-/* ---- Section labels ------------------------------------------------------ */
-.section-label {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--brass);
-    margin-bottom: 10px;
-    display: block;
-}
+def render_footer():
+    st.markdown("""
+    <div class="desk-footer">
+        Built for Shaikh Zulqarnain &nbsp;·&nbsp; developed by <span class="name">Serene</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-/* =========================================================================
-   STREAMLIT WIDGET OVERRIDES
-   ========================================================================= */
 
-/* Buttons */
-.stButton>button, .stFormSubmitButton>button {
-    background: var(--brass) !important;
-    color: var(--ink) !important;
-    border: none !important;
-    border-radius: 999px !important;
-    font-weight: 600 !important;
-    font-family: var(--sans) !important;
-    font-size: 0.88rem !important;
-    padding: 0.6rem 1.6rem !important;
-    transition: transform .3s var(--ea
+# =========================================================================
+# SESSION / LOGIN
+# Device stays logged in via a token stored in the URL query params.
+# =========================================================================
+
+if "account" not in st.session_state:
+    st.session_state.account = None
+if "pending_login" not in st.session_state:
+    st.session_state.pending_login = None
+
+if st.session_state.account is None:
+    token_from_url = st.query_params.get("t", None)
+    if token_from_url:
+        acct = get_account_by_device_token(token_from_url)
+        if acct and acct["verified"]:
+            st.session_state.account = acct
+
+
+def do_logout():
+    st.session_state.account = None
+    st.session_state.pending_login = None
+    st.query_params.clear()
+
+
+# =========================================================================
+# LOGIN SCREEN
+# =========================================================================
+
+if st.session_state.account is None:
+    render_header("Shaikh Zulqarnain · 10th A", "The Book Desk", "Log in to reserve books or manage the desk.")
+
+    if st.session_state.pending_login is None:
+        st.markdown('<span class="section-label">Select your name</span>', unsafe_allow_html=True)
+        chosen_name = st.selectbox("Name", NAME_OPTIONS, label_visibility="collapsed")
+
+        st.markdown('<span class="section-label">Your email address</span>', unsafe_allow_html=True)
+        email_input = st.text_input("Email", label_visibility="collapsed", placeholder="you@example.com")
+
+        if st.button("Continue", use_container_width=True):
+            email_clean = email_input.strip().lower()
+            if not email_clean or "@" not in email_clean:
+                st.error("Please enter a valid email address.")
+            elif chosen_name == "admin":
+                if email_clean != ADMIN_EMAIL.lower():
+                    st.error("This email isn't authorized for the admin account.")
+                else:
+                    st.session_state.pending_login = {"name": "admin", "email": email_clean, "mode": "admin_password"}
+                    st.rerun()
+            else:
+                existing = get_account_by_email(email_clean)
+                if existing and existing["name"] != chosen_name:
+                    st.error("This email is already registered under a different name.")
+                else:
+                    code = generate_code()
+                    ok, err = send_verification_email(email_clean, code)
+                    if not ok:
+                        st.error(err)
+                    else:
+                        set_login_code(email_clean, chosen_name, code)
+                        st.session_state.pending_login = {"name": chosen_name, "email": email_clean, "mode": "email_code"}
+                        st.success(f"Code sent to {email_clean}. Check your inbox.")
+                        st.rerun()
+
+    elif st.session_state.pending_login["mode"] == "admin_password":
+        st.markdown('<span class="section-label">Admin login — enter the admin password</span>', unsafe_allow_html=True)
+        pw = st.text_input("Password", type="password", label_visibility="collapsed")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Unlock admin", use_container_width=True):
+                admin_pw = st.secrets.get("ADMIN_PASSWORD", None)
+                if not admin_pw:
+                    st.error(
+                        "No admin password is configured. Set ADMIN_PASSWORD in your app's Secrets "
+                        "(Streamlit Cloud → Settings → Secrets)."
+                    )
+                elif pw == admin_pw:
+                    acct = create_or_get_account("admin", ADMIN_EMAIL, is_admin=True)
+                    token = generate_device_token()
+                    mark_verified_with_token(ADMIN_EMAIL, token)
+                    st.session_state.account = get_account_by_email(ADMIN_EMAIL)
+                    st.session_state.pending_login = None
+                    st.query_params["t"] = token
+                    log_admin_action("login")
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
+        with c2:
+            if st.button("Back", use_container_width=True, type="secondary"):
+                st.session_state.pending_login = None
+                st.rerun()
+
+    elif st.session_state.pending_login["mode"] == "email_code":
+        pending = st.session_state.pending_login
+        st.markdown(
+            f'<span class="section-label">Enter the 6-digit code sent to {pending["email"]}</span>',
+            unsafe_allow_html=True
+        )
+        code_input = st.text_input("Code", label_visibility="collapsed", placeholder="123456", max_chars=6)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Verify", use_container_width=True):
+                if check_login_code(pending["email"], code_input.strip()):
+                    create_or_get_account(pending["name"], pending["email"])
+                    token = generate_device_token()
+                    mark_verified_with_token(pending["email"], token)
+                    clear_login_code(pending["email"])
+                    st.session_state.account = get_account_by_email(pending["email"])
+                    st.session_state.pending_login = None
+                    st.query_params["t"] = token
+                    st.rerun()
+                else:
+                    st.error("Incorrect or expired code.")
+        with c2:
+            if st.button("Resend code", use_container_width=True, type="secondary"):
+                code = generate_code()
+                ok, err = send_verification_email(pending["email"], code)
+                if ok:
+                    set_login_code(pending["email"], pending["name"], code)
+                    st.success("New code sent.")
+                else:
+                    st.error(err)
+        if st.button("Use a different name or email", type="secondary"):
+            st.session_state.pending_login = None
+            st.rerun()
+
+    render_footer()
+    st.stop()
+
+
+# ========================================
