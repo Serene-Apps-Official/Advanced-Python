@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 from contextlib import contextmanager
 
 st.set_page_config(
-    page_title="The Book Desk — Shaikh Zulqarnain",
+    page_title="Safha — Shaikh Zulqarnain",
     page_icon="📚",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -285,6 +285,14 @@ def unmark_returned(reservation_id):
         )
 
 
+def update_reservation_date(reservation_id, new_date_iso):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE reservations SET needed_by_date = ? WHERE id = ?",
+            (new_date_iso, reservation_id)
+        )
+
+
 def cancel_reservation(reservation_id):
     with get_conn() as conn:
         conn.execute("UPDATE reservations SET status = 'cancelled' WHERE id = ?", (reservation_id,))
@@ -358,7 +366,7 @@ def send_verification_email(to_email, code):
     body = (
         f"Your verification code is: {code}\n\n"
         f"This code expires in 10 minutes.\n\n"
-        f"— The Book Desk (Shaikh Zulqarnain's book sharing log)"
+        f"— Safha (Shaikh Zulqarnain's book sharing log)"
     )
     msg = MIMEText(body)
     msg["Subject"] = subject
@@ -639,6 +647,7 @@ html, body, [data-testid="stAppViewContainer"] {
     background: var(--paper-raised) !important;
     border-right: 1px solid var(--line) !important;
 }
+
 .side-name {
     font-family: 'Fraunces', serif;
     font-size: 1.15rem;
@@ -656,6 +665,20 @@ html, body, [data-testid="stAppViewContainer"] {
 [data-testid="stSidebar"] [data-testid="stRadio"] label {
     color: var(--ink) !important;
     font-size: 0.92rem;
+}
+
+/* Sidebar buttons (e.g. "Log out") need stronger contrast than the main
+   content buttons since they sit on the darker --paper-raised panel. */
+[data-testid="stSidebar"] .stButton button {
+    background: var(--paper-card) !important;
+    color: #ffffff !important;
+    border: 1.5px solid var(--gold) !important;
+    font-weight: 600 !important;
+}
+
+[data-testid="stSidebar"] .stButton button:hover {
+    background: var(--gold) !important;
+    color: var(--paper) !important;
 }
 
 /* ---- Tabs ---- */
@@ -696,17 +719,440 @@ html, body, [data-testid="stAppViewContainer"] {
 
 .desk-footer {
     margin-top: 3rem;
-    padding-top: 1.2rem;
+    padding-top: 1.6rem;
     border-top: 1px solid var(--line);
     text-align: center;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--ink-faint);
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .desk-footer .name {
-    color: var(--gold-bright);
+    display: block;
+    margin-top: 0.35rem;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
     font-weight: 500;
+    font-size: 1.35rem;
+    letter-spacing: 0.01em;
+    text-transform: none;
+    background: linear-gradient(90deg, var(--gold-dim), var(--gold-bright) 45%, var(--gold-dim));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 22px rgba(127, 227, 240, 0.25);
+}
+/* =========================================================================
+   CUSTOM WIDGET SKIN
+   Streamlit's native controls (radio, tabs, file_uploader, expander,
+   dataframe) are kept for their functionality — they're the only way data
+   reaches Python — but every default visual trace is stripped and rebuilt
+   to look like a hand-built component.
+   ========================================================================= */
+
+/* Hide Streamlit chrome globally */
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+div[data-testid="stToolbar"],
+.stDeployButton,
+[data-testid="stMainMenu"] {
+    display: none !important;
+}
+
+/* ---- Pill navigation (built on st.radio, circles hidden) ---- */
+
+/* ---- Pill navigation (built on the sidebar's st.radio, circles hidden;
+   targets [data-testid="stSidebar"] directly since it IS a genuine
+   ancestor of the radio widget, unlike a standalone st.markdown div) ---- */
+
+[data-testid="stSidebar"] [data-testid="stRadio"] > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 0.55rem 1rem !important;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    width: 100%;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+    background: rgba(47, 184, 201, 0.08);
+    border-color: var(--line);
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] input:checked + div {
+    color: var(--gold-bright) !important;
+    font-weight: 600 !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {
+    display: none !important;
+}
+
+/* ---- Custom tab strip enhancements (targets ALL st.tabs on the page,
+   since a wrapping <div> from st.markdown does not nest around a
+   separately-rendered st.tabs() call in Streamlit's DOM) ---- */
+
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+[data-testid="stTabs"] [data-baseweb="tab-border"] {
+    display: none !important;
+}
+
+/* ---- File uploader restyled as a signature dropzone ---- */
+
+[data-testid="stFileUploader"] {
+    background: var(--paper-raised);
+    border: 1.5px dashed var(--line);
+    border-radius: 14px;
+    padding: 0.4rem;
+}
+
+[data-testid="stFileUploader"] section {
+    background: transparent !important;
+    border: none !important;
+}
+
+[data-testid="stFileUploader"] small {
+    color: var(--ink-faint) !important;
+}
+
+[data-testid="stFileUploaderDropzoneInstructions"] span,
+[data-testid="stFileUploaderDropzoneInstructions"] div {
+    color: var(--ink-dim) !important;
+}
+
+[data-testid="stFileUploader"] button {
+    background: transparent !important;
+    color: var(--gold-bright) !important;
+    border: 1px solid var(--gold-dim) !important;
+    border-radius: 999px !important;
+}
+
+/* ---- Expander restyled as a clean accordion row ---- */
+
+[data-testid="stExpander"] {
+    background: var(--paper-card) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 14px !important;
+    margin-top: 0.6rem;
+    overflow: hidden;
+}
+
+[data-testid="stExpander"] summary {
+    padding: 0.85rem 1rem !important;
+    font-family: 'Fraunces', serif;
+    font-size: 0.95rem;
+    color: var(--ink) !important;
+}
+
+[data-testid="stExpander"] summary:hover {
+    background: rgba(47, 184, 201, 0.06);
+}
+
+[data-testid="stExpander"] svg {
+    fill: var(--gold) !important;
+}
+
+/* ---- Dataframe restyled as a clean elegant table ---- */
+
+[data-testid="stDataFrame"] * {
+    font-family: 'Inter', sans-serif !important;
+}
+
+[data-testid="stDataFrame"] [role="columnheader"] {
+    background: var(--paper-raised) !important;
+    color: var(--gold-bright) !important;
+    font-weight: 600 !important;
+    font-size: 0.78rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+[data-testid="stDataFrame"] [role="gridcell"] {
+    background: var(--paper-card) !important;
+    color: var(--ink) !important;
+    font-size: 0.85rem !important;
+}
+
+/* ---- Hide default field labels/help text we've replaced with our own ---- */
+
+[data-testid="stWidgetLabel"] {
+    display: none;
+}
+
+.show-label [data-testid="stWidgetLabel"] {
+    display: block;
+}
+
+.show-label [data-testid="stWidgetLabel"] p {
+    color: var(--ink-dim) !important;
+    font-size: 0.82rem !important;
+}
+
+/* ---- Custom brand mark for the login screen ---- */
+
+.brand-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(47,184,201,0.18), rgba(47,184,201,0.02));
+    border: 1px solid var(--line);
+    margin: 0 auto 1.1rem auto;
+    font-family: 'Fraunces', serif;
+    font-size: 1.5rem;
+    color: var(--gold-bright);
+    text-align: center;
+}
+
+/* ---- Custom stat chips for admin overview ---- */
+
+.stat-row {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin: 0.6rem 0 1.2rem 0;
+}
+
+.stat-chip {
+    flex: 1 1 120px;
+    background: var(--paper-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 0.7rem 0.9rem;
+}
+
+.stat-chip .stat-num {
+    font-family: 'Fraunces', serif;
+    font-size: 1.5rem;
+    color: var(--gold-bright);
+    line-height: 1;
+}
+
+.stat-chip .stat-label {
+    font-size: 0.7rem;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 0.2rem;
+}
+
+/* ---- Custom queue-position ring ---- */
+
+.pos-ring {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1.5px solid var(--gold);
+    color: var(--gold-bright);
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+
+.res-card-flex {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* =========================================================================
+   ANIMATIONS
+   Entrance keyframes on load, subtle ambient motion on key accents, and
+   richer hover/press feedback everywhere the person actually interacts.
+   Respects prefers-reduced-motion for anyone who's asked their system to
+   minimize motion.
+   ========================================================================= */
+
+@keyframes safha-fade-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes safha-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes safha-scale-in {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes safha-glow-breathe {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(47, 184, 201, 0.0); }
+    50%      { box-shadow: 0 0 26px 4px rgba(47, 184, 201, 0.22); }
+}
+
+@keyframes safha-shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+@keyframes safha-pulse-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(47, 184, 201, 0.35); }
+    70%  { box-shadow: 0 0 0 8px rgba(47, 184, 201, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(47, 184, 201, 0); }
+}
+
+@keyframes safha-underline-grow {
+    from { width: 0%; }
+    to   { width: 100%; }
+}
+
+/* ---- Page entrance: header + brand mark fade/rise in on load ---- */
+
+.desk-header {
+    animation: safha-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.brand-mark {
+    animation: safha-scale-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both,
+               safha-glow-breathe 3.2s ease-in-out 0.6s infinite;
+}
+
+/* ---- Cards: staggered rise-in. nth-of-type gives each row in a list a
+   slightly later start so they cascade rather than pop in together ---- */
+
+.book-row, .res-card, .stat-chip, [data-testid="stExpander"] {
+    animation: safha-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.book-row:nth-of-type(1),  .res-card:nth-of-type(1)  { animation-delay: 0.02s; }
+.book-row:nth-of-type(2),  .res-card:nth-of-type(2)  { animation-delay: 0.08s; }
+.book-row:nth-of-type(3),  .res-card:nth-of-type(3)  { animation-delay: 0.14s; }
+.book-row:nth-of-type(4),  .res-card:nth-of-type(4)  { animation-delay: 0.20s; }
+.book-row:nth-of-type(5),  .res-card:nth-of-type(5)  { animation-delay: 0.26s; }
+.book-row:nth-of-type(n+6),.res-card:nth-of-type(n+6){ animation-delay: 0.30s; }
+
+.stat-chip:nth-of-type(1) { animation-delay: 0.02s; }
+.stat-chip:nth-of-type(2) { animation-delay: 0.08s; }
+.stat-chip:nth-of-type(3) { animation-delay: 0.14s; }
+.stat-chip:nth-of-type(4) { animation-delay: 0.20s; }
+
+/* Card hover lift, layered on top of the entrance animation */
+.book-row, .res-card, .stat-chip {
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.book-row:hover, .res-card:hover, .stat-chip:hover {
+    transform: translateY(-3px);
+    border-color: var(--gold-dim);
+    box-shadow: 0 14px 30px -18px rgba(47, 184, 201, 0.45);
+}
+
+/* ---- Buttons: shimmer sweep + press feedback ---- */
+
+.stButton button, .stFormSubmitButton button, .stDownloadButton button {
+    position: relative;
+    overflow: hidden;
+}
+
+.stButton button::before, .stFormSubmitButton button::before, .stDownloadButton button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.16) 50%, transparent 70%);
+    background-size: 200% 100%;
+    background-position: 200% 0;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.stButton button:hover::before, .stFormSubmitButton button:hover::before, .stDownloadButton button:hover::before {
+    opacity: 1;
+    animation: safha-shimmer 1.1s ease-in-out infinite;
+}
+
+.stButton button:active, .stFormSubmitButton button:active, .stDownloadButton button:active {
+    transform: scale(0.97) translateY(0) !important;
+}
+
+/* ---- Queue badge: gentle pulse when students are waiting ---- */
+
+.queue-badge.busy {
+    animation: safha-pulse-ring 2.2s ease-out infinite;
+}
+
+/* ---- Sidebar nav: active pill glows softly, links slide right on hover ---- */
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    transition: all 0.2s ease, transform 0.2s ease;
+}
+
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+    transform: translateX(3px);
+}
+
+/* ---- Position ring: soft pulse to draw the eye to queue placement ---- */
+
+.pos-ring {
+    animation: safha-pulse-ring 2.6s ease-out infinite;
+}
+
+/* ---- Footer name: fades in last, after everything else has settled ---- */
+
+.desk-footer {
+    animation: safha-fade-in 0.8s ease 0.3s both;
+}
+
+/* ---- Input focus: soft glow grows in rather than snapping on ---- */
+
+[data-testid="stTextInput"] input,
+[data-testid="stDateInput"] input {
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* ---- Tab underline slides in on selection ---- */
+
+[data-testid="stTabs"] button[aria-selected="true"] {
+    position: relative;
+}
+
+/* ---- Alerts (success/error/info) rise in when they appear ---- */
+
+[data-testid="stAlert"] {
+    animation: safha-fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---- File uploader dropzone glows gently to invite interaction ---- */
+
+[data-testid="stFileUploader"] {
+    transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+[data-testid="stFileUploader"]:hover {
+    border-color: var(--gold-dim);
+    background: rgba(47, 184, 201, 0.03);
+}
+
+/* ---- Respect reduced-motion preference: disable non-essential motion ---- */
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
 }
 """
 
@@ -739,6 +1185,34 @@ def days_until(date_str):
         return None
 
 
+def signature_to_base64(uploaded_file):
+    """Reads an uploaded signature image and returns (base64_str, mime_type)."""
+    if uploaded_file is None:
+        return None, None
+    file_bytes = uploaded_file.getvalue()
+    b64 = base64.b64encode(file_bytes).decode("utf-8")
+    return b64, uploaded_file.type
+
+
+def format_reservation_date(date_str):
+    """Formats a date like '5 August' and adds '(tomorrow)' / '(today)' when relevant."""
+    try:
+        d = datetime.date.fromisoformat(date_str)
+    except Exception:
+        return date_str
+    today = datetime.date.today()
+    tomorrow = today + datetime.timedelta(days=1)
+    try:
+        pretty = f"{d.day} {d.strftime('%B')}"
+    except Exception:
+        pretty = date_str
+    if d == today:
+        return f"{pretty} (today)"
+    elif d == tomorrow:
+        return f"{pretty} (tomorrow)"
+    return pretty
+
+
 def render_queue_badge_html(count):
     if count == 0:
         return '<span class="queue-badge empty">available</span>'
@@ -754,6 +1228,12 @@ def render_footer():
         Developed by <span class="name">Shaikh Zulqarnain</span>
     </div>
     """, unsafe_allow_html=True)
+
+
+def render_field_label(text):
+    """Custom label replacing Streamlit's default widget label, styled to
+    match the rest of the hand-built UI."""
+    st.markdown(f'<span class="section-label">{text}</span>', unsafe_allow_html=True)
 
 
 # =========================================================================
@@ -781,110 +1261,110 @@ def do_logout():
 
 
 # =========================================================================
-# LOGIN SCREEN
+# LOGIN SCREEN — custom card shell around functional Streamlit inputs
 # =========================================================================
 
 if st.session_state.account is None:
-    render_header("Shaikh Zulqarnain · 10th A", "The Book Desk", "Log in to reserve books or manage the desk.")
+    login_col_l, login_col_mid, login_col_r = st.columns([1, 3, 1])
+    with login_col_mid:
+        st.markdown('<div class="brand-mark">📚</div>', unsafe_allow_html=True)
+        render_header("Shaikh Zulqarnain · 10th A", "Safha", "Log in to reserve books or manage the desk.")
 
-    if st.session_state.pending_login is None:
-        st.markdown('<span class="section-label">Select your name</span>', unsafe_allow_html=True)
-        chosen_name = st.selectbox("Name", NAME_OPTIONS, label_visibility="collapsed")
+        if st.session_state.pending_login is None:
+            render_field_label("Select your name")
+            chosen_name = st.selectbox("Name", NAME_OPTIONS, label_visibility="collapsed")
 
-        st.markdown('<span class="section-label">Your email address</span>', unsafe_allow_html=True)
-        email_input = st.text_input("Email", label_visibility="collapsed", placeholder="you@example.com")
+            render_field_label("Your email address")
+            email_input = st.text_input("Email", label_visibility="collapsed", placeholder="you@example.com")
 
-        if st.button("Continue", use_container_width=True):
-            email_clean = email_input.strip().lower()
-            if not email_clean or "@" not in email_clean:
-                st.error("Please enter a valid email address.")
-            elif chosen_name == "admin":
-                if email_clean != ADMIN_EMAIL.lower():
-                    st.error("This email isn't authorized for the admin account.")
-                else:
-                    st.session_state.pending_login = {"name": "admin", "email": email_clean, "mode": "admin_password"}
-                    st.rerun()
-            else:
-                existing = get_account_by_email(email_clean)
-                if existing and existing["name"] != chosen_name:
-                    st.error("This email is already registered under a different name.")
-                else:
-                    code = generate_code()
-                    ok, err = send_verification_email(email_clean, code)
-                    if not ok:
-                        st.error(err)
+            if st.button("Continue", use_container_width=True):
+                email_clean = email_input.strip().lower()
+                if not email_clean or "@" not in email_clean:
+                    st.error("Please enter a valid email address.")
+                elif chosen_name == "admin":
+                    if email_clean != ADMIN_EMAIL.lower():
+                        st.error("This email isn't authorized for the admin account.")
                     else:
-                        set_login_code(email_clean, chosen_name, code)
-                        st.session_state.pending_login = {"name": chosen_name, "email": email_clean, "mode": "email_code"}
-                        st.success(f"Code sent to {email_clean}. Check your inbox.")
+                        st.session_state.pending_login = {"name": "admin", "email": email_clean, "mode": "admin_password"}
                         st.rerun()
-
-    elif st.session_state.pending_login["mode"] == "admin_password":
-        st.markdown('<span class="section-label">Admin login — enter the admin password</span>', unsafe_allow_html=True)
-        pw = st.text_input("Password", type="password", label_visibility="collapsed")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Unlock admin", use_container_width=True):
-                admin_pw = st.secrets.get("ADMIN_PASSWORD", None)
-                if not admin_pw:
-                    st.error(
-                        "No admin password is configured. Set ADMIN_PASSWORD in your app's Secrets "
-                        "(Streamlit Cloud → Settings → Secrets)."
-                    )
-                elif pw == admin_pw:
-                    acct = create_or_get_account("admin", ADMIN_EMAIL, is_admin=True)
-                    force_admin_flag(ADMIN_EMAIL)
-                    token = generate_device_token()
-                    mark_verified_with_token(ADMIN_EMAIL, token)
-                    st.session_state.account = get_account_by_email(ADMIN_EMAIL)
-                    st.session_state.pending_login = None
-                    st.query_params["t"] = token
-                    log_admin_action("login")
-                    st.rerun()
                 else:
-                    st.error("Incorrect password.")
-        with c2:
-            if st.button("Back", use_container_width=True, type="secondary"):
-                st.session_state.pending_login = None
-                st.rerun()
-
-    elif st.session_state.pending_login["mode"] == "email_code":
-        pending = st.session_state.pending_login
-        st.markdown(
-            f'<span class="section-label">Enter the 6-digit code sent to {pending["email"]}</span>',
-            unsafe_allow_html=True
-        )
-        code_input = st.text_input("Code", label_visibility="collapsed", placeholder="123456", max_chars=6)
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Verify", use_container_width=True):
-                if check_login_code(pending["email"], code_input.strip()):
-                    existing_acct = get_account_by_email(pending["email"])
-                    if existing_acct and existing_acct["suspended"]:
-                        st.error("This account has been suspended. Please contact Shaikh Zulqarnain.")
+                    existing = get_account_by_email(email_clean)
+                    if existing and existing["name"] != chosen_name:
+                        st.error("This email is already registered under a different name.")
                     else:
-                        create_or_get_account(pending["name"], pending["email"])
+                        code = generate_code()
+                        ok, err = send_verification_email(email_clean, code)
+                        if not ok:
+                            st.error(err)
+                        else:
+                            set_login_code(email_clean, chosen_name, code)
+                            st.session_state.pending_login = {"name": chosen_name, "email": email_clean, "mode": "email_code"}
+                            st.success(f"Code sent to {email_clean}. Check your inbox.")
+                            st.rerun()
+
+        elif st.session_state.pending_login["mode"] == "admin_password":
+            render_field_label("Admin login — enter the admin password")
+            pw = st.text_input("Password", type="password", label_visibility="collapsed")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Unlock admin", use_container_width=True):
+                    admin_pw = st.secrets.get("ADMIN_PASSWORD", None)
+                    if not admin_pw:
+                        st.error(
+                            "No admin password is configured. Set ADMIN_PASSWORD in your app's Secrets "
+                            "(Streamlit Cloud → Settings → Secrets)."
+                        )
+                    elif pw == admin_pw:
+                        acct = create_or_get_account("admin", ADMIN_EMAIL, is_admin=True)
+                        force_admin_flag(ADMIN_EMAIL)
                         token = generate_device_token()
-                        mark_verified_with_token(pending["email"], token)
-                        clear_login_code(pending["email"])
-                        st.session_state.account = get_account_by_email(pending["email"])
+                        mark_verified_with_token(ADMIN_EMAIL, token)
+                        st.session_state.account = get_account_by_email(ADMIN_EMAIL)
                         st.session_state.pending_login = None
                         st.query_params["t"] = token
+                        log_admin_action("login")
                         st.rerun()
-                else:
-                    st.error("Incorrect or expired code.")
-        with c2:
-            if st.button("Resend code", use_container_width=True, type="secondary"):
-                code = generate_code()
-                ok, err = send_verification_email(pending["email"], code)
-                if ok:
-                    set_login_code(pending["email"], pending["name"], code)
-                    st.success("New code sent.")
-                else:
-                    st.error(err)
-        if st.button("Use a different name or email", type="secondary"):
-            st.session_state.pending_login = None
-            st.rerun()
+                    else:
+                        st.error("Incorrect password.")
+            with c2:
+                if st.button("Back", use_container_width=True, type="secondary"):
+                    st.session_state.pending_login = None
+                    st.rerun()
+
+        elif st.session_state.pending_login["mode"] == "email_code":
+            pending = st.session_state.pending_login
+            render_field_label(f"Enter the 6-digit code sent to {pending['email']}")
+            code_input = st.text_input("Code", label_visibility="collapsed", placeholder="123456", max_chars=6)
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Verify", use_container_width=True):
+                    if check_login_code(pending["email"], code_input.strip()):
+                        existing_acct = get_account_by_email(pending["email"])
+                        if existing_acct and existing_acct["suspended"]:
+                            st.error("This account has been suspended. Please contact Shaikh Zulqarnain.")
+                        else:
+                            create_or_get_account(pending["name"], pending["email"])
+                            token = generate_device_token()
+                            mark_verified_with_token(pending["email"], token)
+                            clear_login_code(pending["email"])
+                            st.session_state.account = get_account_by_email(pending["email"])
+                            st.session_state.pending_login = None
+                            st.query_params["t"] = token
+                            st.rerun()
+                    else:
+                        st.error("Incorrect or expired code.")
+            with c2:
+                if st.button("Resend code", use_container_width=True, type="secondary"):
+                    code = generate_code()
+                    ok, err = send_verification_email(pending["email"], code)
+                    if ok:
+                        set_login_code(pending["email"], pending["name"], code)
+                        st.success("New code sent.")
+                    else:
+                        st.error(err)
+            if st.button("Use a different name or email", type="secondary"):
+                st.session_state.pending_login = None
+                st.rerun()
 
     render_footer()
     st.stop()
@@ -916,7 +1396,7 @@ counts = reservation_counts_by_book()
 # ---- Reserve a book ---------------------------------------------------
 
 if nav == "Reserve a book":
-    render_header("The Book Desk", "Reserve a Book", "Pick a subject item and join the queue.")
+    render_header("Safha", "Reserve a Book", "Pick a subject item and join the queue.")
 
     subjects = list(SUBJECTS.keys())
     tabs = st.tabs(subjects)
@@ -940,20 +1420,32 @@ if nav == "Reserve a book":
                     st.caption("You're already in the queue for this item.")
                 else:
                     with st.form(key=f"form_{book_id}", clear_on_submit=True, border=False):
+                        tomorrow = datetime.date.today() + datetime.timedelta(days=1)
+                        render_field_label("Needed by")
                         c1, c2 = st.columns([2, 1])
                         with c1:
                             needed_by = st.date_input(
-                                "Needed by", value=datetime.date.today(),
+                                "Needed by", value=tomorrow,
                                 min_value=datetime.date.today(), key=f"date_{book_id}",
                                 label_visibility="collapsed"
                             )
                         with c2:
                             submitted = st.form_submit_button("Join queue", use_container_width=True)
+                        render_field_label("Upload your signature (photo of handwritten signature)")
+                        sig_file = st.file_uploader(
+                            "Signature",
+                            type=["png", "jpg", "jpeg"],
+                            key=f"sig_{book_id}",
+                            label_visibility="collapsed",
+                        )
                         if submitted:
                             if student_already_in_queue(book_id, account["name"]):
                                 st.error("You're already in the queue for this item.")
+                            elif sig_file is None:
+                                st.error("Please upload a photo of your signature to complete the reservation.")
                             else:
-                                create_reservation(book_id, account["name"], needed_by.isoformat(), None, None)
+                                sig_b64, sig_type = signature_to_base64(sig_file)
+                                create_reservation(book_id, account["name"], needed_by.isoformat(), sig_b64, sig_type)
                                 st.success(f"Joined the queue for {item_type}.")
                                 st.rerun()
                 st.markdown('<div class="row-spacer"></div>', unsafe_allow_html=True)
@@ -961,7 +1453,7 @@ if nav == "Reserve a book":
 # ---- My reservations ---------------------------------------------------
 
 elif nav == "My reservations":
-    render_header("The Book Desk", "My Reservations", "Your active spots in the queue.")
+    render_header("Safha", "My Reservations", "Your active spots in the queue.")
 
     my_res = get_reservations_for_student(account["name"])
     if not my_res:
@@ -970,14 +1462,30 @@ elif nav == "My reservations":
         for r in my_res:
             subject, item_type = r["book_id"].split("::")
             pos = get_queue_position(r["id"])
-            d_left = days_until(r["needed_by_date"])
-            due_text = f"{d_left} day(s) left" if d_left is not None and d_left >= 0 else "overdue" if d_left is not None else ""
+            date_display = format_reservation_date(r["needed_by_date"])
             st.markdown(f"""
             <div class="res-card">
-                <div class="res-card-title">{subject} — {item_type}</div>
-                <div class="res-card-meta">Position <b>#{pos}</b> in queue &nbsp;·&nbsp; needed by {r['needed_by_date']} &nbsp;·&nbsp; {due_text}</div>
+                <div class="res-card-flex">
+                    <div class="pos-ring">#{pos}</div>
+                    <div>
+                        <div class="res-card-title">{subject} — {item_type}</div>
+                        <div class="res-card-meta">
+                            <b>Name:</b> {account['name']} &nbsp;·&nbsp;
+                            <b>Book Reserved:</b> {subject} — {item_type} &nbsp;·&nbsp;
+                            <b>Date:</b> {date_display}
+                        </div>
+                    </div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
+            if r["signature_data"]:
+                try:
+                    sig_bytes = base64.b64decode(r["signature_data"])
+                    st.image(sig_bytes, caption="Signature", width=180)
+                except Exception:
+                    st.caption("Signature: (unable to display)")
+            else:
+                st.caption("Signature: not on file")
             if st.button("Cancel this reservation", key=f"cancel_{r['id']}"):
                 cancel_reservation(r["id"])
                 st.rerun()
@@ -985,13 +1493,27 @@ elif nav == "My reservations":
 # ---- Admin panel ---------------------------------------------------
 
 elif nav == "Admin panel" and is_admin:
-    render_header("The Book Desk", "Admin Panel", "Manage the queue, students, and records.")
+    render_header("Safha", "Admin Panel", "Manage the queue, students, and records.")
+
+    all_res_for_stats = get_all_reservations()
+    waiting_count = sum(1 for r in all_res_for_stats if r["status"] == "waiting")
+    fulfilled_count = sum(1 for r in all_res_for_stats if r["status"] == "fulfilled")
+    missing_sig_count = sum(1 for r in all_res_for_stats if not r["signature_data"])
+    st.markdown(f"""
+    <div class="stat-row">
+        <div class="stat-chip"><div class="stat-num">{len(all_res_for_stats)}</div><div class="stat-label">Total reservations</div></div>
+        <div class="stat-chip"><div class="stat-num">{waiting_count}</div><div class="stat-label">Waiting</div></div>
+        <div class="stat-chip"><div class="stat-num">{fulfilled_count}</div><div class="stat-label">Fulfilled</div></div>
+        <div class="stat-chip"><div class="stat-num">{missing_sig_count}</div><div class="stat-label">Missing signature</div></div>
+    </div>
+    """, unsafe_allow_html=True)
 
     admin_tabs = st.tabs(["Queues", "All reservations", "Students", "Export & log"])
 
     with admin_tabs[0]:
         subjects = list(SUBJECTS.keys())
-        pick_subject = st.selectbox("Subject", subjects)
+        render_field_label("Subject")
+        pick_subject = st.selectbox("Subject", subjects, label_visibility="collapsed")
         for item_type in SUBJECTS[pick_subject]:
             book_id = f"{pick_subject}::{item_type}"
             queue = get_queue_for_book(book_id)
@@ -1018,26 +1540,88 @@ elif nav == "Admin panel" and is_admin:
         all_res = get_all_reservations()
         if not all_res:
             st.markdown('<div class="empty-state">No reservations yet.</div>', unsafe_allow_html=True)
-        for r in all_res:
-            subject, item_type = r["book_id"].split("::")
-            st.markdown(f"""
-            <div class="res-card">
-                <div class="res-card-title">{r['student_name']} — {subject} ({item_type})</div>
-                <div class="res-card-meta">status: {r['status']} &nbsp;·&nbsp; needed by {r['needed_by_date']} &nbsp;·&nbsp; returned: {'yes' if r['returned'] else 'no'}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            with c1:
-                if not r["returned"]:
-                    if st.button("Mark returned", key=f"ret_{r['id']}"):
-                        mark_returned(r["id"], datetime.date.today().isoformat())
-                        log_admin_action("mark_returned", f"{r['student_name']} — {r['book_id']}")
-                        st.rerun()
-            with c2:
-                if st.button("Delete record", key=f"del_{r['id']}"):
-                    delete_reservation(r["id"])
-                    log_admin_action("delete_reservation", f"{r['student_name']} — {r['book_id']}")
-                    st.rerun()
+        else:
+            st.markdown('<div class="section-label">Overview</div>', unsafe_allow_html=True)
+            table_rows = []
+            for r in all_res:
+                subject, item_type = r["book_id"].split("::")
+                table_rows.append({
+                    "Name": r["student_name"],
+                    "Book Reserved": f"{subject} — {item_type}",
+                    "Date": format_reservation_date(r["needed_by_date"]),
+                    "Status": r["status"],
+                    "Returned": "Yes" if r["returned"] else "No",
+                    "Signature": "On file" if r["signature_data"] else "Missing",
+                })
+            st.dataframe(
+                table_rows,
+                use_container_width=True,
+                hide_index=True,
+                column_order=["Name", "Book Reserved", "Date", "Status", "Returned", "Signature"],
+            )
+
+            st.markdown('<div class="section-label">Manage individual reservations</div>', unsafe_allow_html=True)
+            for r in all_res:
+                subject, item_type = r["book_id"].split("::")
+                date_display = format_reservation_date(r["needed_by_date"])
+                with st.expander(f"{r['student_name']} — {subject} ({item_type}) · {date_display}"):
+                    st.markdown(f"""
+                    <div class="res-card">
+                        <div class="res-card-meta">
+                            <b>Name:</b> {r['student_name']} &nbsp;·&nbsp;
+                            <b>Book Reserved:</b> {subject} — {item_type} &nbsp;·&nbsp;
+                            <b>Date:</b> {date_display} &nbsp;·&nbsp;
+                            <b>Status:</b> {r['status']} &nbsp;·&nbsp;
+                            <b>Returned:</b> {'Yes' if r['returned'] else 'No'}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    if r["signature_data"]:
+                        try:
+                            sig_bytes = base64.b64decode(r["signature_data"])
+                            st.image(sig_bytes, caption="Signature on file", width=180)
+                        except Exception:
+                            st.caption("Signature: (unable to display)")
+                    else:
+                        st.caption("Signature: not on file")
+
+                    render_field_label("Edit reservation date")
+                    ec1, ec2 = st.columns([2, 1])
+                    with ec1:
+                        try:
+                            current_date = datetime.date.fromisoformat(r["needed_by_date"])
+                        except Exception:
+                            current_date = datetime.date.today()
+                        new_date = st.date_input(
+                            "New date", value=current_date, key=f"editdate_{r['id']}",
+                            label_visibility="collapsed"
+                        )
+                    with ec2:
+                        if st.button("Save date", key=f"savedate_{r['id']}", use_container_width=True):
+                            update_reservation_date(r["id"], new_date.isoformat())
+                            log_admin_action("edit_date", f"{r['student_name']} — {r['book_id']} → {new_date.isoformat()}")
+                            st.success("Date updated.")
+                            st.rerun()
+
+                    st.markdown('<div class="row-spacer"></div>', unsafe_allow_html=True)
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if not r["returned"]:
+                            if st.button("Mark returned", key=f"ret_{r['id']}", use_container_width=True):
+                                mark_returned(r["id"], datetime.date.today().isoformat())
+                                log_admin_action("mark_returned", f"{r['student_name']} — {r['book_id']}")
+                                st.rerun()
+                        else:
+                            if st.button("Undo returned", key=f"unret_{r['id']}", use_container_width=True):
+                                unmark_returned(r["id"])
+                                log_admin_action("unmark_returned", f"{r['student_name']} — {r['book_id']}")
+                                st.rerun()
+                    with c2:
+                        if st.button("Delete record", key=f"del_{r['id']}", use_container_width=True):
+                            delete_reservation(r["id"])
+                            log_admin_action("delete_reservation", f"{r['student_name']} — {r['book_id']}")
+                            st.rerun()
 
     with admin_tabs[2]:
         accounts_list = get_all_accounts()
@@ -1066,9 +1650,21 @@ elif nav == "Admin panel" and is_admin:
             import csv
             import io
             buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=list(all_res[0].keys()))
+            fieldnames = ["Name", "Book Reserved", "Date", "Status", "Returned", "Returned On", "Signature", "Reserved On"]
+            writer = csv.DictWriter(buf, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(all_res)
+            for r in all_res:
+                subject, item_type = r["book_id"].split("::")
+                writer.writerow({
+                    "Name": r["student_name"],
+                    "Book Reserved": f"{subject} — {item_type}",
+                    "Date": r["needed_by_date"],
+                    "Status": r["status"],
+                    "Returned": "Yes" if r["returned"] else "No",
+                    "Returned On": r["returned_on"] or "",
+                    "Signature": "On file" if r["signature_data"] else "Missing",
+                    "Reserved On": r["created_at"],
+                })
             st.download_button(
                 "Download all reservations (CSV)",
                 data=buf.getvalue(),
